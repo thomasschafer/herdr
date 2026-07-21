@@ -272,6 +272,10 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::LastWorkspace => {
+                self.last_workspace_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::PreviousAgent => {
                 if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(false) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
@@ -659,6 +663,17 @@ impl App {
         if let Some((ws_idx, target_pane_id)) = self.state.last_pane_in_tab_target() {
             self.focus_pane_internal_via_api(ws_idx, target_pane_id);
         }
+    }
+
+    pub(crate) fn last_workspace_via_api(&mut self) {
+        let Some(ws_id) = self.state.previous_workspace.clone() else {
+            return;
+        };
+        let Some(ws_idx) = self.state.workspaces.iter().position(|ws| ws.id == ws_id) else {
+            self.state.previous_workspace = None;
+            return;
+        };
+        self.focus_workspace_idx_via_api(ws_idx);
     }
 
     pub(crate) fn focus_toast_target_via_api(&mut self) {
@@ -1398,6 +1413,7 @@ pub(crate) enum NavigateAction {
     CyclePanePrevious,
     LastPane,
     LastPaneInTab,
+    LastWorkspace,
     Help,
     Settings,
     ReloadConfig,
@@ -1426,6 +1442,7 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
             | NavigateAction::LastPaneInTab
+            | NavigateAction::LastWorkspace
             | NavigateAction::OpenNotificationTarget
     )
 }
@@ -1513,6 +1530,7 @@ fn non_indexed_action_for_key(
         (&kb.close_workspace, NavigateAction::CloseWorkspace),
         (&kb.previous_workspace, NavigateAction::PreviousWorkspace),
         (&kb.next_workspace, NavigateAction::NextWorkspace),
+        (&kb.last_workspace, NavigateAction::LastWorkspace),
         (&kb.previous_agent, NavigateAction::PreviousAgent),
         (&kb.next_agent, NavigateAction::NextAgent),
         (&kb.new_tab, NavigateAction::NewTab),
@@ -1688,6 +1706,10 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::NextWorkspace => {
             state.next_workspace();
+            leave_navigate_mode(state);
+        }
+        NavigateAction::LastWorkspace => {
+            state.last_workspace();
             leave_navigate_mode(state);
         }
         NavigateAction::PreviousAgent => {

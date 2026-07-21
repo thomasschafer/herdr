@@ -1398,6 +1398,10 @@ pub struct AppState {
     pub workspaces: Vec<Workspace>,
     pub active: Option<usize>,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
+    /// Workspace ID of the workspace visited before the current active one.
+    /// Used to implement toggle (last-workspace) semantics. May become stale if
+    /// the workspace is deleted; will be cleared on the next toggle attempt.
+    pub(crate) previous_workspace: Option<String>,
     pub selected: usize,
     pub mode: Mode,
     pub should_quit: bool,
@@ -1768,6 +1772,7 @@ impl AppState {
             workspaces: Vec::new(),
             active: None,
             previous_pane_focus: None,
+            previous_workspace: None,
             selected: 0,
             mode: Mode::Navigate,
             should_quit: false,
