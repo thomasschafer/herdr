@@ -1089,6 +1089,30 @@ impl ClientShellState {
                     pane_id: pane_id.clone(),
                 }))
             }
+            KeybindAction::LastPaneInTab => {
+                let focused_tab = focused_tab?;
+                let focused_pane = focused_pane?;
+                let pane_id = self
+                    .previous_pane_ids_by_tab
+                    .get(&focused_tab)
+                    .filter(|pane_id| {
+                        pane_id.as_str() != focused_pane
+                            && snapshot.panes.iter().any(|pane| {
+                                pane.tab_id == focused_tab && pane.pane_id == pane_id.as_str()
+                            })
+                    })
+                    .cloned()
+                    .or_else(|| {
+                        snapshot
+                            .panes
+                            .iter()
+                            .find(|pane| {
+                                pane.tab_id == focused_tab && pane.pane_id != focused_pane
+                            })
+                            .map(|pane| pane.pane_id.clone())
+                    })?;
+                Some(Method::PaneFocus(PaneTarget { pane_id }))
+            }
             KeybindAction::Zoom => Some(Method::PaneZoom(PaneZoomParams {
                 pane_id: focused_pane,
                 mode: PaneZoomMode::Toggle,
