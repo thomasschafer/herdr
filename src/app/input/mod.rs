@@ -764,6 +764,7 @@ impl AppState {
         ));
 
         let previous_focus = self.current_pane_focus_target();
+        let previous_tab_root = self.current_tab_root_pane();
         if let Some(ws_idx) = self.active {
             let Some(ws) = self.workspaces.get_mut(ws_idx) else {
                 return;
@@ -784,7 +785,7 @@ impl AppState {
                 self.remove_alias_shadowed_by_new_pane(new_id);
                 self.terminals
                     .insert(new_pane.terminal.id.clone(), new_pane.terminal);
-                self.record_pane_focus_change(previous_focus, ws_idx, new_id);
+                self.record_pane_focus_change(previous_focus, previous_tab_root, ws_idx, new_id);
                 self.mark_session_dirty();
                 self.mode = Mode::Terminal;
             }

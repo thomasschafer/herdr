@@ -113,6 +113,7 @@ impl App {
         let cwd = Some(self.plugin_pane_cwd(plugin, params.cwd));
         let (rows, cols) = self.state.estimate_pane_size();
         let previous_focus = self.state.current_pane_focus_target();
+        let previous_tab_root = self.state.current_tab_root_pane();
         let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
             return encode_error(id, "workspace_not_found", "workspace not found");
         };
@@ -142,8 +143,12 @@ impl App {
         };
         if params.focus || placement == PluginPanePlacement::Zoomed {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
-            self.state
-                .record_pane_focus_change(previous_focus, ws_idx, new_pane.pane_id);
+            self.state.record_pane_focus_change(
+                previous_focus,
+                previous_tab_root,
+                ws_idx,
+                new_pane.pane_id,
+            );
             self.state.mode = crate::app::Mode::Terminal;
         }
         if placement == PluginPanePlacement::Zoomed {

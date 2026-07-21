@@ -266,6 +266,15 @@ impl AppState {
         })
     }
 
+    /// The `root_pane` of the active workspace's active tab, if any. Captured
+    /// before a focus-changing operation and compared afterwards so that
+    /// per-tab last-pane bookkeeping only records same-tab focus changes.
+    pub(crate) fn current_tab_root_pane(&self) -> Option<PaneId> {
+        let ws_idx = self.active?;
+        let ws = self.workspaces.get(ws_idx)?;
+        ws.active_tab().map(|tab| tab.root_pane)
+    }
+
     pub(crate) fn pane_focus_target_indices(
         &self,
         target: &PaneFocusTarget,
@@ -278,29 +287,88 @@ impl AppState {
         Some((ws_idx, tab_idx))
     }
 
+    /// Records a pane focus change into both the global toggle
+    /// (`previous_pane_focus`) and the target tab's own toggle
+    /// (`Tab::previous_pane_focus`). Takes explicit field references rather
+    /// than `&mut self` so it can be called by sites that already hold a
+    /// disjoint borrow of `self.workspaces`. The tab toggle is only updated
+    /// when the previous focus was in the same tab as the target, so
+    /// switching tabs/workspaces away and back leaves each tab's own toggle
+    /// untouched. `previous_tab_root` and `target_tab_root` are the tab
+    /// identities of `previous` and `target`.
+    pub(crate) fn record_pane_focus_history(
+        previous_pane_focus: &mut Option<PaneFocusTarget>,
+        target_tab_previous_focus: &mut Option<PaneId>,
+        previous: Option<PaneFocusTarget>,
+        previous_tab_root: Option<PaneId>,
+        target: &PaneFocusTarget,
+        target_tab_root: PaneId,
+    ) {
+        if previous.as_ref() == Some(target) {
+            return;
+        }
+        if let Some(prev) = previous.as_ref() {
+            if previous_tab_root == Some(target_tab_root) {
+                *target_tab_previous_focus = Some(prev.pane_id);
+            }
+        }
+        *previous_pane_focus = previous;
+    }
+
     pub(crate) fn record_pane_focus_change(
         &mut self,
         previous: Option<PaneFocusTarget>,
+        previous_tab_root: Option<PaneId>,
         ws_idx: usize,
         pane_id: PaneId,
     ) {
         let Some(ws) = self.workspaces.get(ws_idx) else {
             return;
         };
+        let Some(tab_idx) = ws.find_tab_index_for_pane(pane_id) else {
+            return;
+        };
+        let target_tab_root = ws.tabs[tab_idx].root_pane;
         let target = PaneFocusTarget {
             workspace_id: ws.id.clone(),
             pane_id,
         };
-        if previous.as_ref() != Some(&target) {
-            self.previous_pane_focus = previous;
-        }
+        Self::record_pane_focus_history(
+            &mut self.previous_pane_focus,
+            &mut self.workspaces[ws_idx].tabs[tab_idx].previous_pane_focus,
+            previous,
+            previous_tab_root,
+            &target,
+            target_tab_root,
+        );
     }
 
-    fn record_pane_focus_after_navigation(&mut self, previous: Option<PaneFocusTarget>) {
+    fn record_pane_focus_after_navigation(
+        &mut self,
+        previous: Option<PaneFocusTarget>,
+        previous_tab_root: Option<PaneId>,
+    ) {
         let current = self.current_pane_focus_target();
-        if previous != current {
-            self.previous_pane_focus = previous;
+        if previous == current {
+            return;
         }
+        let Some(target) = current else {
+            self.previous_pane_focus = previous;
+            return;
+        };
+        let Some((ws_idx, tab_idx)) = self.pane_focus_target_indices(&target) else {
+            self.previous_pane_focus = previous;
+            return;
+        };
+        let target_tab_root = self.workspaces[ws_idx].tabs[tab_idx].root_pane;
+        Self::record_pane_focus_history(
+            &mut self.previous_pane_focus,
+            &mut self.workspaces[ws_idx].tabs[tab_idx].previous_pane_focus,
+            previous,
+            previous_tab_root,
+            &target,
+            target_tab_root,
+        );
     }
 
     fn sync_selection_after_focus_navigation(&mut self) {
@@ -318,7 +386,9 @@ impl AppState {
         let Some(tab_idx) = ws.find_tab_index_for_pane(pane_id) else {
             return false;
         };
+        let target_tab_root = ws.tabs[tab_idx].root_pane;
         let previous = self.current_pane_focus_target();
+        let previous_tab_root = self.current_tab_root_pane();
         let target = PaneFocusTarget {
             workspace_id: ws.id.clone(),
             pane_id,
@@ -337,7 +407,14 @@ impl AppState {
             .and_then(|ws| ws.tabs.get_mut(tab_idx))
         {
             tab.layout.focus_pane(pane_id);
-            self.previous_pane_focus = previous;
+            Self::record_pane_focus_history(
+                &mut self.previous_pane_focus,
+                &mut tab.previous_pane_focus,
+                previous,
+                previous_tab_root,
+                &target,
+                target_tab_root,
+            );
             self.mark_session_dirty();
             self.sync_copy_mode_with_focus();
             return true;
@@ -1111,6 +1188,7 @@ impl AppState {
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
             let previous_focus = self.current_pane_focus_target();
+            let previous_tab_root = self.current_tab_root_pane();
             self.active = Some(idx);
             self.selected = idx;
             let workspace_id = self.workspaces[idx].id.clone();
@@ -1126,7 +1204,7 @@ impl AppState {
             }
             self.tab_scroll_follow_active = true;
             self.refresh_tab_bar_view();
-            self.record_pane_focus_after_navigation(previous_focus);
+            self.record_pane_focus_after_navigation(previous_focus, previous_tab_root);
             self.sync_selection_after_focus_navigation();
         }
     }
@@ -1144,6 +1222,7 @@ impl AppState {
         }
 
         let previous_focus = self.current_pane_focus_target();
+        let previous_tab_root = self.current_tab_root_pane();
         let workspace_changed = self.active != Some(ws_idx);
         self.active = Some(ws_idx);
         self.selected = ws_idx;
@@ -1161,7 +1240,7 @@ impl AppState {
         }
         self.tab_scroll_follow_active = true;
         self.refresh_tab_bar_view();
-        self.record_pane_focus_after_navigation(previous_focus);
+        self.record_pane_focus_after_navigation(previous_focus, previous_tab_root);
         self.sync_selection_after_focus_navigation();
         true
     }
@@ -1249,6 +1328,7 @@ impl AppState {
     pub fn switch_tab(&mut self, idx: usize) {
         if let Some(ws_idx) = self.active {
             let previous_focus = self.current_pane_focus_target();
+            let previous_tab_root = self.current_tab_root_pane();
             let Some(ws) = self.workspaces.get_mut(ws_idx) else {
                 return;
             };
@@ -1259,7 +1339,7 @@ impl AppState {
             self.mark_session_dirty();
             self.tab_scroll_follow_active = true;
             self.refresh_tab_bar_view();
-            self.record_pane_focus_after_navigation(previous_focus);
+            self.record_pane_focus_after_navigation(previous_focus, previous_tab_root);
             self.sync_selection_after_focus_navigation();
         }
     }
@@ -1904,6 +1984,40 @@ impl AppState {
             tab.layout.focus_pane(target.pane_id);
             self.previous_pane_focus = current;
             self.mark_session_dirty();
+        }
+    }
+
+    /// The pane the tab-scoped last-pane toggle should focus, as
+    /// `(ws_idx, pane_id)`. Prefers the active tab's recorded previous focus;
+    /// if there is none (or it is stale or already focused), falls back to any
+    /// other pane in the same tab. Returns `None` when the tab has a single
+    /// pane, so there is nothing to toggle to.
+    pub(crate) fn last_pane_in_tab_target(&self) -> Option<(usize, PaneId)> {
+        let ws_idx = self.active?;
+        let ws = self.workspaces.get(ws_idx)?;
+        let tab = ws.active_tab()?;
+        let current = tab.layout.focused();
+        if let Some(previous) = tab.previous_pane_focus {
+            if previous != current && tab.panes.contains_key(&previous) {
+                return Some((ws_idx, previous));
+            }
+        }
+        tab.layout
+            .pane_ids()
+            .into_iter()
+            .find(|&id| id != current)
+            .map(|id| (ws_idx, id))
+    }
+
+    /// Like `last_pane`, but scoped to the active tab: toggles between the two
+    /// most recently focused panes within that tab only, ignoring focus
+    /// changes that happened in other tabs or workspaces. When the tab has no
+    /// recorded history yet but holds more than one pane, focuses another pane
+    /// in the tab.
+    #[cfg(test)]
+    pub fn last_pane_in_tab(&mut self) {
+        if let Some((ws_idx, target)) = self.last_pane_in_tab_target() {
+            self.focus_pane_in_workspace(ws_idx, target);
         }
     }
 
@@ -4460,6 +4574,99 @@ mod tests {
         assert_eq!(state.workspaces[1].active_tab, second_tab);
         assert_eq!(state.workspaces[1].focused_pane_id(), Some(second_tab_root));
         assert_ne!(second_first_root, second_tab_root);
+    }
+
+    #[test]
+    fn last_pane_in_tab_toggles_within_active_tab() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, root);
+        state.focus_pane_in_workspace(0, right);
+        state.last_pane_in_tab();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(root));
+
+        state.last_pane_in_tab();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(right));
+    }
+
+    #[test]
+    fn removing_background_pane_preserves_last_pane_in_tab_history() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+        let background = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, root);
+        state.focus_pane_in_workspace(0, right);
+        state.workspaces[0].remove_pane(background);
+        state.last_pane_in_tab();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(root));
+    }
+
+    #[test]
+    fn last_pane_in_tab_falls_back_to_another_pane_without_history() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+
+        // No intra-tab focus change has been recorded yet.
+        assert!(state.workspaces[0].tabs[0].previous_pane_focus.is_none());
+        let before = state.workspaces[0].focused_pane_id().expect("focused pane");
+
+        state.last_pane_in_tab();
+
+        let after = state.workspaces[0].focused_pane_id().expect("focused pane");
+        assert_ne!(before, after, "fallback should move to the other pane");
+        assert!(after == root || after == right);
+    }
+
+    #[test]
+    fn last_pane_in_tab_is_noop_in_single_pane_tab() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+
+        state.last_pane_in_tab();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(root));
+    }
+
+    #[test]
+    fn last_pane_in_tab_is_scoped_per_tab_and_ignores_other_tabs() {
+        let mut state = app_with_workspaces(&["one"]);
+        let t0_root = state.workspaces[0].tabs[0].root_pane;
+        let t0_right = state.workspaces[0].test_split(Direction::Horizontal);
+        let t1 = state.workspaces[0].test_add_tab(Some("logs"));
+        state.switch_tab(t1);
+        let t1_root = state.workspaces[0].tabs[t1].root_pane;
+        let t1_right = state.workspaces[0].test_split(Direction::Horizontal);
+
+        // Record each tab's own A/B history.
+        state.focus_pane_in_workspace(0, t0_root);
+        state.focus_pane_in_workspace(0, t0_right);
+        state.focus_pane_in_workspace(0, t1_root);
+        state.focus_pane_in_workspace(0, t1_right);
+
+        // Active tab is t1: toggling stays within t1.
+        state.last_pane_in_tab();
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].active_tab, t1);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(t1_root));
+
+        state.last_pane_in_tab();
+        assert_eq!(state.workspaces[0].active_tab, t1);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(t1_right));
+
+        // Switching to t0 and toggling uses t0's own history, unaffected by
+        // all the activity in t1.
+        state.switch_tab(0);
+        state.last_pane_in_tab();
+        assert_eq!(state.workspaces[0].active_tab, 0);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(t0_root));
     }
 
     #[test]

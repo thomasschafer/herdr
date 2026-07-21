@@ -723,6 +723,7 @@ fn restore_tab(
                 panes,
                 #[cfg(test)]
                 runtimes: HashMap::new(),
+                previous_pane_focus: None,
                 zoomed: snap.zoomed,
                 events: runtime_context.events.clone(),
                 render_notify: runtime_context.render_notify.clone(),

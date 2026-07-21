@@ -400,6 +400,10 @@ impl App {
                 self.last_pane_via_api();
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::LastPaneInTab => {
+                self.last_pane_in_tab_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
             NavigateAction::ReloadConfig => {
@@ -649,6 +653,12 @@ impl App {
             return;
         }
         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
+    }
+
+    pub(crate) fn last_pane_in_tab_via_api(&mut self) {
+        if let Some((ws_idx, target_pane_id)) = self.state.last_pane_in_tab_target() {
+            self.focus_pane_internal_via_api(ws_idx, target_pane_id);
+        }
     }
 
     pub(crate) fn focus_toast_target_via_api(&mut self) {
@@ -1018,9 +1028,17 @@ impl App {
             workspace_id: ws.id.clone(),
             pane_id: new_pane_id,
         };
-        if previous_focus_target.as_ref() != Some(&new_focus_target) {
-            self.state.previous_pane_focus = previous_focus_target;
-        }
+        // The new pane splits the focused pane in the active tab, so both the
+        // previous focus and the new pane share this tab's identity.
+        let tab_root = ws.tabs[tab_idx].root_pane;
+        crate::app::state::AppState::record_pane_focus_history(
+            &mut self.state.previous_pane_focus,
+            &mut ws.tabs[tab_idx].previous_pane_focus,
+            previous_focus_target,
+            Some(tab_root),
+            &new_focus_target,
+            tab_root,
+        );
         ws.active_tab_mut()
             .expect("workspace must have an active tab")
             .layout
@@ -1122,9 +1140,17 @@ impl App {
             workspace_id,
             pane_id: new_pane.pane_id,
         };
-        if previous_focus_target.as_ref() != Some(&new_focus_target) {
-            self.state.previous_pane_focus = previous_focus_target;
-        }
+        // The overlay pane splits the focused pane in the active tab, so both
+        // the previous focus and the new pane share this tab's identity.
+        let tab_root = self.state.workspaces[ws_idx].tabs[tab_idx].root_pane;
+        crate::app::state::AppState::record_pane_focus_history(
+            &mut self.state.previous_pane_focus,
+            &mut self.state.workspaces[ws_idx].tabs[tab_idx].previous_pane_focus,
+            previous_focus_target,
+            Some(tab_root),
+            &new_focus_target,
+            tab_root,
+        );
         self.state.switch_workspace_tab(ws_idx, tab_idx);
         self.state.mode = Mode::Terminal;
         Ok((ws_idx, new_pane))
@@ -1371,6 +1397,7 @@ pub(crate) enum NavigateAction {
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
+    LastPaneInTab,
     Help,
     Settings,
     ReloadConfig,
@@ -1398,6 +1425,7 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePaneNext
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
+            | NavigateAction::LastPaneInTab
             | NavigateAction::OpenNotificationTarget
     )
 }
@@ -1504,6 +1532,7 @@ fn non_indexed_action_for_key(
         (&kb.swap_pane_up, NavigateAction::SwapPaneUp),
         (&kb.swap_pane_right, NavigateAction::SwapPaneRight),
         (&kb.last_pane, NavigateAction::LastPane),
+        (&kb.last_pane_in_tab, NavigateAction::LastPaneInTab),
         (&kb.cycle_pane_next, NavigateAction::CyclePaneNext),
         (&kb.cycle_pane_previous, NavigateAction::CyclePanePrevious),
         (&kb.split_vertical, NavigateAction::SplitVertical),
@@ -1756,6 +1785,10 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::LastPane => {
             state.last_pane();
+            leave_navigate_mode(state);
+        }
+        NavigateAction::LastPaneInTab => {
+            state.last_pane_in_tab();
             leave_navigate_mode(state);
         }
         NavigateAction::Help => super::modal::open_keybind_help(state),

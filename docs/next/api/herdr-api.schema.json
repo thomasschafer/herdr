@@ -4006,6 +4006,13 @@
         },
         "TabCreateParams": {
           "properties": {
+            "argv": {
+              "description": "When non-empty, the tab's root pane runs this argv directly instead of\nthe configured interactive shell, and the tab closes when it exits.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "cwd": {
               "type": [
                 "string",

@@ -59,6 +59,7 @@ impl App {
         let host_terminal_theme = self.state.host_terminal_theme;
         let host_terminal_appearance = self.state.host_terminal_appearance;
         let previous_focus = self.state.current_pane_focus_target();
+        let previous_tab_root = self.state.current_tab_root_pane();
         let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
@@ -103,8 +104,12 @@ impl App {
         };
         if params.focus {
             self.state.switch_workspace_tab(ws_idx, target_tab_idx);
-            self.state
-                .record_pane_focus_change(previous_focus, ws_idx, new_pane.pane_id);
+            self.state.record_pane_focus_change(
+                previous_focus,
+                previous_tab_root,
+                ws_idx,
+                new_pane.pane_id,
+            );
             self.state.settle_terminal_mode_after_focus();
         }
         self.terminal_runtimes
@@ -544,6 +549,7 @@ impl App {
         if reason.is_none() {
             if let Some(target_pane_id) = target_pane_id {
                 let previous_focus = self.state.current_pane_focus_target();
+                let previous_tab_root = self.state.current_tab_root_pane();
                 if let Some(tab) = self
                     .state
                     .workspaces
@@ -554,8 +560,12 @@ impl App {
                     tab.layout.focus_pane(source_pane_id);
                     if changed {
                         self.state.switch_workspace_tab(ws_idx, tab_idx);
-                        self.state
-                            .record_pane_focus_change(previous_focus, ws_idx, source_pane_id);
+                        self.state.record_pane_focus_change(
+                            previous_focus,
+                            previous_tab_root,
+                            ws_idx,
+                            source_pane_id,
+                        );
                         self.state.mark_session_dirty();
                         self.schedule_session_save();
                     }
@@ -803,6 +813,7 @@ impl App {
         };
 
         let previous_focus = self.state.current_pane_focus_target();
+        let previous_tab_root = self.state.current_tab_root_pane();
         let taken = match self
             .state
             .workspaces
@@ -949,8 +960,12 @@ impl App {
         if focus || self.state.active.is_none() {
             self.state
                 .switch_workspace_tab(target_ws_idx, target_tab_idx);
-            self.state
-                .record_pane_focus_change(previous_focus, target_ws_idx, moved_pane_id);
+            self.state.record_pane_focus_change(
+                previous_focus,
+                previous_tab_root,
+                target_ws_idx,
+                moved_pane_id,
+            );
             self.state.settle_terminal_mode_after_focus();
         }
         let created_workspace = created_workspace.then(|| self.workspace_info(target_ws_idx));
