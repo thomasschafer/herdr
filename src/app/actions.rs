@@ -1199,7 +1199,14 @@ impl AppState {
         if idx < self.workspaces.len() {
             let previous_focus = self.current_pane_focus_target();
             let previous_tab_root = self.current_tab_root_pane();
+            let previous_ws_id = self
+                .active
+                .and_then(|i| self.workspaces.get(i).map(|ws| ws.id.clone()));
+            let workspace_changed = self.active != Some(idx);
             self.active = Some(idx);
+            if workspace_changed {
+                self.previous_workspace = previous_ws_id;
+            }
             self.selected = idx;
             let workspace_id = self.workspaces[idx].id.clone();
             crate::logging::workspace_focused(&workspace_id);
@@ -1234,7 +1241,13 @@ impl AppState {
         let previous_focus = self.current_pane_focus_target();
         let previous_tab_root = self.current_tab_root_pane();
         let workspace_changed = self.active != Some(ws_idx);
+        let previous_ws_id = self
+            .active
+            .and_then(|i| self.workspaces.get(i).map(|ws| ws.id.clone()));
         self.active = Some(ws_idx);
+        if workspace_changed {
+            self.previous_workspace = previous_ws_id;
+        }
         self.selected = ws_idx;
         let workspace_id = self.workspaces[ws_idx].id.clone();
         if workspace_changed {
@@ -2027,6 +2040,20 @@ impl AppState {
         if let Some((ws_idx, target)) = self.last_pane_in_tab_target() {
             self.focus_pane_in_workspace(ws_idx, target);
         }
+    }
+
+    /// Toggle to the previous workspace. Toggles between the two most recently
+    /// active workspaces. Pressing again returns to the original workspace.
+    #[cfg(test)]
+    pub fn last_workspace(&mut self) {
+        let Some(ws_id) = self.previous_workspace.clone() else {
+            return;
+        };
+        let Some(ws_idx) = self.workspaces.iter().position(|ws| ws.id == ws_id) else {
+            self.previous_workspace = None;
+            return;
+        };
+        self.switch_workspace(ws_idx);
     }
 
     pub(crate) fn apply_pane_zoom(
@@ -4523,6 +4550,44 @@ mod tests {
         state.switch_workspace(2);
         assert_eq!(state.active, Some(2));
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn last_workspace_toggles_between_the_two_most_recent_workspaces() {
+        let mut state = app_with_workspaces(&["a", "b", "c"]);
+        state.switch_workspace(1);
+        assert_eq!(state.active, Some(1));
+
+        state.last_workspace();
+        assert_eq!(state.active, Some(0));
+
+        state.last_workspace();
+        assert_eq!(state.active, Some(1));
+    }
+
+    #[test]
+    fn last_workspace_survives_refocusing_the_already_active_workspace() {
+        let mut state = app_with_workspaces(&["a", "b", "c"]);
+        state.switch_workspace(1);
+
+        // `workspace.focus` on the workspace that is already active must not
+        // discard the toggle target.
+        state.switch_workspace(1);
+
+        state.last_workspace();
+        assert_eq!(state.active, Some(0));
+    }
+
+    #[test]
+    fn last_workspace_clears_history_pointing_at_a_removed_workspace() {
+        let mut state = app_with_workspaces(&["a", "b", "c"]);
+        state.switch_workspace(1);
+        state.workspaces.remove(0);
+        state.active = Some(0);
+
+        state.last_workspace();
+
+        assert!(state.previous_workspace.is_none());
     }
 
     #[test]
