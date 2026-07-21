@@ -1274,6 +1274,7 @@ impl Workspace {
             layout,
             panes,
             runtimes: HashMap::new(),
+            previous_pane_focus: None,
             zoomed: false,
             events,
             render_notify,
@@ -1330,6 +1331,7 @@ impl Workspace {
             layout,
             panes,
             runtimes: HashMap::new(),
+            previous_pane_focus: None,
             zoomed: false,
             events,
             render_notify,
@@ -1438,6 +1440,15 @@ impl Workspace {
                 "workspace {} tab {} layout panes must exactly match pane states",
                 self.id, tab_idx
             );
+            if let Some(previous_pane_focus) = tab.previous_pane_focus {
+                assert!(
+                    pane_set.contains(&previous_pane_focus),
+                    "workspace {} tab {} previous_pane_focus {:?} is not a live pane in the tab",
+                    self.id,
+                    tab_idx,
+                    previous_pane_focus
+                );
+            }
 
             for (pane_id, pane) in &tab.panes {
                 assert!(

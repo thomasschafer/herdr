@@ -45,6 +45,10 @@ pub struct Tab {
     pub panes: HashMap<PaneId, PaneState>,
     #[cfg(test)]
     pub runtimes: HashMap<PaneId, TerminalRuntime>,
+    /// The pane focused in this tab immediately before the current one, used
+    /// by the tab-scoped last-pane toggle. Ephemeral runtime state, not
+    /// persisted. Cleared when the referenced pane leaves the tab.
+    pub(crate) previous_pane_focus: Option<PaneId>,
     pub zoomed: bool,
     pub events: mpsc::Sender<AppEvent>,
     pub(crate) render_notify: Arc<Notify>,
@@ -187,6 +191,7 @@ impl Tab {
                 panes,
                 #[cfg(test)]
                 runtimes: HashMap::new(),
+                previous_pane_focus: None,
                 zoomed: false,
                 events,
                 render_notify,
@@ -480,6 +485,7 @@ impl Tab {
             panes,
             #[cfg(test)]
             runtimes: HashMap::new(),
+            previous_pane_focus: None,
             zoomed: false,
             events,
             render_notify,
@@ -501,6 +507,9 @@ impl Tab {
         }
 
         let pane_state = self.panes.remove(&pane_id)?;
+        if self.previous_pane_focus == Some(pane_id) {
+            self.previous_pane_focus = None;
+        }
         self.zoomed = false;
         Some(MovedPane {
             pane_id,
@@ -539,6 +548,9 @@ impl Tab {
 
         let pane = self.panes.remove(&pane_id)?;
         let terminal_id = pane.attached_terminal_id;
+        if self.previous_pane_focus == Some(pane_id) {
+            self.previous_pane_focus = None;
+        }
         self.zoomed = false;
         if let Some(next_root) = next_root {
             self.root_pane = next_root;
