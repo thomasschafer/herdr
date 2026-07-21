@@ -984,6 +984,7 @@ impl HeadlessServer {
                 focus: true,
                 label,
                 env: Default::default(),
+                argv: Vec::new(),
             }),
         )
     }

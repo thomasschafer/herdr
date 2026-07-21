@@ -51,6 +51,7 @@ impl App {
             focus,
             label,
             env,
+            argv,
         } = params;
         let ws_idx = if let Some(workspace_id) = workspace_id {
             let Some(ws_idx) = self.parse_workspace_id(&workspace_id) else {
@@ -80,16 +81,29 @@ impl App {
             .get_mut(ws_idx)
             .ok_or_else(|| std::io::Error::other("workspace disappeared"))
             .and_then(|ws| {
-                ws.create_tab(
-                    rows,
-                    cols,
-                    cwd,
-                    scrollback_limit_bytes,
-                    host_terminal_theme,
-                    host_terminal_appearance,
-                    crate::pane::PaneShellConfig::new(&default_shell, self.state.shell_mode),
-                    extra_env,
-                )
+                if argv.is_empty() {
+                    ws.create_tab(
+                        rows,
+                        cols,
+                        cwd,
+                        scrollback_limit_bytes,
+                        host_terminal_theme,
+                        host_terminal_appearance,
+                        crate::pane::PaneShellConfig::new(&default_shell, self.state.shell_mode),
+                        extra_env,
+                    )
+                } else {
+                    ws.create_tab_argv_command(
+                        rows,
+                        cols,
+                        cwd,
+                        &argv,
+                        extra_env,
+                        scrollback_limit_bytes,
+                        host_terminal_theme,
+                        host_terminal_appearance,
+                    )
+                }
             });
         match result {
             Ok((tab_idx, terminal, runtime)) => {
@@ -483,6 +497,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                argv: Vec::new(),
             },
         );
 

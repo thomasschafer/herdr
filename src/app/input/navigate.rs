@@ -299,6 +299,7 @@ impl App {
                                 focus: true,
                                 label: None,
                                 env: Default::default(),
+                                argv: Vec::new(),
                             },
                         );
                         leave_navigate_mode(&mut self.state);

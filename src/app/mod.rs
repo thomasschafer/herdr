@@ -971,6 +971,7 @@ impl App {
                         focus: true,
                         label,
                         env: Default::default(),
+                        argv: Vec::new(),
                     },
                 );
                 needs_render = true;
