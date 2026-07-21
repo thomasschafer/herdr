@@ -16,6 +16,10 @@ pub struct TabCreateParams {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// When non-empty, the tab's root pane runs this argv directly instead of
+    /// the configured interactive shell, and the tab closes when it exits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]

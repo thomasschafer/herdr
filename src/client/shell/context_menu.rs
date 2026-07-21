@@ -335,6 +335,7 @@ impl ClientShellState {
                             focus: true,
                             label: None,
                             env: Default::default(),
+                            argv: Vec::new(),
                         }),
                         outcome,
                     );
