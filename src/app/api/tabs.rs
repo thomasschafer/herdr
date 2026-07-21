@@ -1,12 +1,17 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabRenameParams, TabTarget,
+    EventData, EventEnvelope, EventKind, ResponseResult, TabCreateCommandParams, TabCreateParams,
+    TabListParams, TabMoveParams, TabRenameParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
 use super::responses::{encode_error, encode_success};
+
+enum TabRootProcess<'a> {
+    Shell,
+    Argv(&'a [String]),
+}
 
 impl App {
     pub(super) fn handle_tab_list(&mut self, id: String, params: TabListParams) -> String {
@@ -45,6 +50,27 @@ impl App {
     }
 
     pub(super) fn handle_tab_create(&mut self, id: String, params: TabCreateParams) -> String {
+        self.create_tab_from_api(id, params, TabRootProcess::Shell)
+    }
+
+    pub(super) fn handle_tab_create_command(
+        &mut self,
+        id: String,
+        params: TabCreateCommandParams,
+    ) -> String {
+        let TabCreateCommandParams { tab, argv } = params;
+        if argv.is_empty() {
+            return encode_error(id, "invalid_request", "argv must not be empty");
+        }
+        self.create_tab_from_api(id, tab, TabRootProcess::Argv(&argv))
+    }
+
+    fn create_tab_from_api(
+        &mut self,
+        id: String,
+        params: TabCreateParams,
+        root_process: TabRootProcess<'_>,
+    ) -> String {
         let TabCreateParams {
             workspace_id,
             cwd,
@@ -79,8 +105,8 @@ impl App {
             .workspaces
             .get_mut(ws_idx)
             .ok_or_else(|| std::io::Error::other("workspace disappeared"))
-            .and_then(|ws| {
-                ws.create_tab(
+            .and_then(|ws| match root_process {
+                TabRootProcess::Shell => ws.create_tab(
                     rows,
                     cols,
                     cwd,
@@ -89,7 +115,17 @@ impl App {
                     host_terminal_appearance,
                     crate::pane::PaneShellConfig::new(&default_shell, self.state.shell_mode),
                     extra_env,
-                )
+                ),
+                TabRootProcess::Argv(argv) => ws.create_tab_argv_command(
+                    rows,
+                    cols,
+                    cwd,
+                    argv,
+                    extra_env,
+                    scrollback_limit_bytes,
+                    host_terminal_theme,
+                    host_terminal_appearance,
+                ),
             });
         match result {
             Ok((tab_idx, terminal, runtime)) => {
@@ -431,8 +467,7 @@ mod tests {
         }));
     }
 
-    #[tokio::test]
-    async fn tab_create_follows_cached_focused_pane_cwd_without_runtime() {
+    fn tab_create_test_app() -> App {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
@@ -444,12 +479,27 @@ mod tests {
         );
         app.state.default_shell = exiting_test_command().into();
         app.state.shell_mode = ShellModeConfig::NonLogin;
-        let workspace = Workspace::test_new("tabs");
-        let focused_pane = workspace.tabs[0].root_pane;
-        app.state.workspaces = vec![workspace];
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.ensure_test_terminals();
+        app
+    }
+
+    fn default_tab_create_params() -> TabCreateParams {
+        TabCreateParams {
+            workspace_id: None,
+            cwd: None,
+            focus: false,
+            label: None,
+            env: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_create_follows_cached_focused_pane_cwd_without_runtime() {
+        let mut app = tab_create_test_app();
+        let focused_pane = app.state.workspaces[0].tabs[0].root_pane;
         let cached_cwd = std::env::temp_dir();
         let terminal_id = app.state.workspaces[0]
             .terminal_id(focused_pane)
@@ -457,16 +507,7 @@ mod tests {
             .unwrap();
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = cached_cwd.clone();
 
-        let response = app.handle_tab_create(
-            "req".into(),
-            TabCreateParams {
-                workspace_id: None,
-                cwd: None,
-                focus: false,
-                label: None,
-                env: Default::default(),
-            },
-        );
+        let response = app.handle_tab_create("req".into(), default_tab_create_params());
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
@@ -478,5 +519,65 @@ mod tests {
             crate::worktree::canonical_or_original(&cached_cwd)
         );
         shutdown_test_runtimes(&mut app);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tab_create_command_runs_argv_instead_of_shell() {
+        let mut app = tab_create_test_app();
+        let marker_dir = std::env::temp_dir().join(format!(
+            "herdr-tab-create-command-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        let marker = marker_dir.join("ran");
+
+        let response = app.handle_tab_create_command(
+            "req".into(),
+            TabCreateCommandParams {
+                tab: default_tab_create_params(),
+                argv: vec![
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    format!("echo ok > '{}'", marker.display()),
+                ],
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "tab argv command never ran"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "ok\n");
+        shutdown_test_runtimes(&mut app);
+        let _ = std::fs::remove_dir_all(marker_dir);
+    }
+
+    #[tokio::test]
+    async fn tab_create_command_rejects_empty_argv_without_creating_a_tab() {
+        let mut app = tab_create_test_app();
+
+        let response = app.handle_tab_create_command(
+            "req".into(),
+            TabCreateCommandParams {
+                tab: default_tab_create_params(),
+                argv: Vec::new(),
+            },
+        );
+
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "invalid_request");
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
     }
 }

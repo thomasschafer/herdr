@@ -1,7 +1,7 @@
-use clap::Command;
+use clap::{Arg, Command};
 
 use crate::api::schema::tabs::{
-    tab_id, TabCreateProjection, TabListProjection, TabRenameProjection,
+    tab_id, TabCreateCommandParams, TabCreateProjection, TabListProjection, TabRenameProjection,
 };
 use crate::api::schema::{Method, Request, TabTarget};
 
@@ -11,6 +11,20 @@ cli_projection! {
     pub(crate) TabTargetProjection for TabTarget {
         tab_id => Field::new(String::new()).input(tab_id()),
     }
+}
+
+fn tab_create_arguments() -> Vec<Arg> {
+    let mut arguments = TabCreateProjection::arguments();
+    arguments.push(
+        Arg::new("argv")
+            .value_name("ARGV")
+            .num_args(0..)
+            .last(true)
+            .help(
+                "Command the tab's root pane runs directly instead of the configured interactive shell; the tab closes when it exits",
+            ),
+    );
+    arguments
 }
 
 const LEAVES: [Leaf; 6] = [
@@ -25,7 +39,7 @@ const LEAVES: [Leaf; 6] = [
         name: "create",
         about: "Create a tab",
         id: "cli:tab:create",
-        arguments: TabCreateProjection::arguments,
+        arguments: tab_create_arguments,
         method: |matches| TabCreateProjection::from_matches(matches).map(Method::TabCreate),
     },
     Leaf {
@@ -66,7 +80,25 @@ pub(crate) fn command() -> Command {
 }
 
 pub(crate) fn request(args: &[String]) -> Result<Request, ParseError> {
-    projection::group_request(command(), &LEAVES, args)
+    let Request { id, method } = projection::group_request(command(), &LEAVES, args)?;
+    // `tab create -- <argv>` sends a separate `tab.create_command` method rather than
+    // a field on `tab.create`, so servers without support reject it instead of
+    // silently opening a shell tab. Clap consumes the trailing argv for grammar and
+    // help, but the values are read back from argv here rather than from matches.
+    let method = match method {
+        Method::TabCreate(tab) => match args.iter().position(|arg| arg == "--") {
+            Some(separator) => {
+                let argv = args[separator + 1..].to_vec();
+                if argv.is_empty() {
+                    return Err(ParseError::Usage("missing command after --".into()));
+                }
+                Method::TabCreateCommand(TabCreateCommandParams { tab, argv })
+            }
+            None => Method::TabCreate(tab),
+        },
+        other => other,
+    };
+    Ok(Request { id, method })
 }
 
 #[cfg(test)]

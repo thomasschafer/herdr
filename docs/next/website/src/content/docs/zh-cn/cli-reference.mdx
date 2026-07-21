@@ -187,14 +187,14 @@ Git 默认拒绝由其他用户拥有的仓库。如果你已独立验证该仓�
 
 ```bash
 herdr tab list [--workspace <workspace_id>]
-herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]
+herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [-- <argv...>]
 herdr tab get <tab_id>
 herdr tab focus <tab_id>
 herdr tab rename <tab_id> <label>
 herdr tab close <tab_id>
 ```
 
-标签页是工作区内的另一个终端布局。不指定 `--workspace` 时,`tab create` 使用活动工作区;如果没有活动工作区则失败。JSON 响应中的 `.result.tab.tab_id` 和 `.result.root_pane.pane_id` 是对应 ID。关闭工作区的最后一个标签页也会关闭该工作区。启用 `ui.confirm_close` 时，如果关闭父工作树的最后一个标签页会连带关闭整个工作树组，`tab close` 会返回 `confirmation_required` 错误。
+标签页是工作区内的另一个终端布局。不指定 `--workspace` 时,`tab create` 使用活动工作区;如果没有活动工作区则失败。JSON 响应中的 `.result.tab.tab_id` 和 `.result.root_pane.pane_id` 是对应 ID。`--` 之后的参数会作为根窗格的命令运行，而不是启动交互式 shell;该命令退出时标签页随之关闭。此功能使用 `tab.create_command` API 方法，因此不支持该方法的旧服务器会拒绝请求，而不会打开 shell 标签页。关闭工作区的最后一个标签页也会关闭该工作区。启用 `ui.confirm_close` 时，如果关闭父工作树的最后一个标签页会连带关闭整个工作树组，`tab close` 会返回 `confirmation_required` 错误。
 
 启用 `ui.confirm_close` 时，通过快捷键或标签页／窗格菜单关闭工作区的最后一个标签页或唯一窗格前，TUI 会要求确认。普通的窗格关闭及 CLI/API 关闭操作仍立即执行。
 

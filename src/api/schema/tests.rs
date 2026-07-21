@@ -207,6 +207,41 @@ fn generated_protocol_schema_artifact_is_current() {
 }
 
 #[test]
+fn tab_create_command_flattens_tab_create_params_next_to_argv() {
+    let request: Request = serde_json::from_value(serde_json::json!({
+        "id": "req_tab",
+        "method": "tab.create_command",
+        "params": {
+            "workspace_id": "w1",
+            "focus": true,
+            "argv": ["nvim", "notes.md"],
+        },
+    }))
+    .unwrap();
+
+    let Method::TabCreateCommand(params) = &request.method else {
+        panic!("expected tab.create_command, got {:?}", request.method);
+    };
+    assert_eq!(params.tab.workspace_id.as_deref(), Some("w1"));
+    assert!(params.tab.focus);
+    assert_eq!(params.argv, ["nvim", "notes.md"]);
+    let restored: Request =
+        serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+    assert_eq!(restored, request);
+}
+
+#[test]
+fn tab_create_command_requires_argv() {
+    let result = serde_json::from_value::<Request>(serde_json::json!({
+        "id": "req_tab",
+        "method": "tab.create_command",
+        "params": {},
+    }));
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn request_round_trips_for_server_stop() {
     let request = Request {
         id: "req_stop".into(),

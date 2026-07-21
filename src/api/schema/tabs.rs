@@ -21,6 +21,18 @@ pub(crate) fn tab_id() -> Input<String> {
     .value_name("TAB_ID")
 }
 
+/// Creates a tab whose root pane runs `argv` directly instead of the configured
+/// interactive shell. The tab closes when the process exits. This is a separate
+/// method rather than a field on `tab.create` so that servers without support
+/// reject it instead of silently opening a shell tab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabCreateCommandParams {
+    #[serde(flatten)]
+    pub tab: TabCreateParams,
+    /// Must be non-empty.
+    pub argv: Vec<String>,
+}
+
 cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct TabCreateParams => TabCreateProjection {

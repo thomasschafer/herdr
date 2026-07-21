@@ -67,4 +67,38 @@ mod tests {
             serde_json::json!({})
         );
     }
+
+    #[test]
+    fn tab_create_with_trailing_argv_sends_create_command() {
+        let request = bindings::request(&args(&[
+            "create", "--workspace", "2", "--focus", "--", "nvim", "notes.md",
+        ]))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "id": "cli:tab:create",
+                "method": "tab.create_command",
+                "params": {"workspace_id": "2", "focus": true, "argv": ["nvim", "notes.md"]},
+            })
+        );
+    }
+
+    #[test]
+    fn tab_create_without_separator_sends_plain_create() {
+        let request = bindings::request(&args(&["create", "--focus"])).unwrap();
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "id": "cli:tab:create",
+                "method": "tab.create",
+                "params": {"focus": true},
+            })
+        );
+    }
+
+    #[test]
+    fn tab_create_rejects_empty_argv_after_separator() {
+        assert!(bindings::request(&args(&["create", "--"])).is_err());
+    }
 }

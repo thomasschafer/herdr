@@ -4270,6 +4270,50 @@
             }
           ]
         },
+        "TabCreateCommandParams": {
+          "description": "Creates a tab whose root pane runs `argv` directly instead of the configured\ninteractive shell. The tab closes when the process exits. This is a separate\nmethod rather than a field on `tab.create` so that servers without support\nreject it instead of silently opening a shell tab.",
+          "properties": {
+            "argv": {
+              "description": "Must be non-empty.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "focus": {
+              "default": false,
+              "type": "boolean"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "argv"
+          ],
+          "type": "object"
+        },
         "TabCreateParams": {
           "properties": {
             "cwd": {
@@ -5137,6 +5181,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.create_command",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabCreateCommandParams"
             }
           },
           "required": [

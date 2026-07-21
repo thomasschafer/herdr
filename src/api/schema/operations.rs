@@ -167,6 +167,7 @@ mod tests {
             "worktree.open",
             "worktree.remove",
             "tab.create",
+            "tab.create_command",
             "tab.focus",
             "tab.rename",
             "tab.move",
