@@ -273,12 +273,24 @@ fn tab_command() -> Command {
         .subcommand(
             Command::new("create")
                 .about("Create a tab")
+                .override_usage(
+                    "herdr tab create [OPTIONS] [-- [ARGV]...]",
+                )
                 .arg(option("workspace", "WORKSPACE_ID"))
                 .arg(path_option("cwd", "PATH"))
                 .arg(option("label", "TEXT"))
                 .arg(env_option())
                 .arg(flag("focus"))
-                .arg(flag("no-focus")),
+                .arg(flag("no-focus"))
+                .arg(
+                    Arg::new("argv")
+                        .value_name("ARGV")
+                        .num_args(0..)
+                        .last(true)
+                        .help(
+                            "When set, the tab's root pane runs this argv directly instead of the configured interactive shell, and the tab closes when it exits",
+                        ),
+                ),
         )
         .subcommand(id_command("get", "tab_id", "Show a tab"))
         .subcommand(id_command("focus", "tab_id", "Focus a tab"))

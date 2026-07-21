@@ -51,6 +51,16 @@ fn tab_list(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn tab_create(args: &[String]) -> std::io::Result<i32> {
+    let separator = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len());
+    let argv = if separator < args.len() {
+        args[separator + 1..].to_vec()
+    } else {
+        Vec::new()
+    };
+
     let mut workspace_id = None;
     let mut cwd = None;
     let mut focus = false;
@@ -58,10 +68,10 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
     let mut env = HashMap::new();
 
     let mut index = 0;
-    while index < args.len() {
+    while index < separator {
         match args[index].as_str() {
             "--workspace" => {
-                let Some(value) = args.get(index + 1) else {
+                let Some(value) = args.get(index + 1).filter(|_| index + 1 < separator) else {
                     eprintln!("missing value for --workspace");
                     return Ok(2);
                 };
@@ -69,7 +79,7 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
                 index += 2;
             }
             "--cwd" => {
-                let Some(value) = args.get(index + 1) else {
+                let Some(value) = args.get(index + 1).filter(|_| index + 1 < separator) else {
                     eprintln!("missing value for --cwd");
                     return Ok(2);
                 };
@@ -77,7 +87,7 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
                 index += 2;
             }
             "--label" => {
-                let Some(value) = args.get(index + 1) else {
+                let Some(value) = args.get(index + 1).filter(|_| index + 1 < separator) else {
                     eprintln!("missing value for --label");
                     return Ok(2);
                 };
@@ -93,7 +103,7 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             "--env" => {
-                let Some(value) = args.get(index + 1) else {
+                let Some(value) = args.get(index + 1).filter(|_| index + 1 < separator) else {
                     eprintln!("missing value for --env");
                     return Ok(2);
                 };
@@ -120,6 +130,7 @@ fn tab_create(args: &[String]) -> std::io::Result<i32> {
         focus,
         label,
         env,
+        argv,
     })
 }
 
@@ -178,7 +189,7 @@ fn print_tab_help() {
     eprintln!("herdr tab commands:");
     eprintln!("  herdr tab list [--workspace <workspace_id>]");
     eprintln!(
-        "  herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]"
+        "  herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus] [-- <argv...>]"
     );
     eprintln!("  herdr tab get <tab_id>");
     eprintln!("  herdr tab focus <tab_id>");
