@@ -890,6 +890,7 @@ pub(crate) struct ClientShellState {
     pub(super) pending_workspace_highlight: Option<PendingWorkspaceHighlight>,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
+    pub(super) previous_workspace_id: Option<String>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) previous_pane_ids_by_tab: HashMap<String, String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
@@ -1055,6 +1056,7 @@ impl ClientShellState {
             pending_workspace_highlight: None,
             reveal_navigation_workspace: false,
             overlay,
+            previous_workspace_id: None,
             previous_pane_id: None,
             previous_pane_ids_by_tab: HashMap::new(),
             pane_mouse_gesture: None,
@@ -1249,6 +1251,7 @@ impl ClientShellState {
             .config
             .startup_onboarding
             .then_some(ClientShellOverlay::Onboarding);
+        self.previous_workspace_id = None;
         self.previous_pane_id = None;
         self.previous_pane_ids_by_tab.clear();
         self.pane_mouse_gesture = None;
@@ -1411,6 +1414,10 @@ impl ClientShellState {
             .and_then(|current| current.focused_workspace_id.as_deref())
             != snapshot.focused_workspace_id.as_deref()
         {
+            self.previous_workspace_id = self
+                .snapshot
+                .as_deref()
+                .and_then(|current| current.focused_workspace_id.clone());
             self.reveal_focused_workspace = true;
         }
         if tab_layout_changed

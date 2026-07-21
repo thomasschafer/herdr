@@ -952,6 +952,20 @@ impl ClientShellState {
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }
+            KeybindAction::LastWorkspace => {
+                let workspace_id = self.previous_workspace_id.as_ref()?;
+                if workspace_id == &focused_workspace
+                    || !snapshot
+                        .workspaces
+                        .iter()
+                        .any(|workspace| &workspace.workspace_id == workspace_id)
+                {
+                    return None;
+                }
+                let workspace_id = workspace_id.clone();
+                self.reveal_workspace(&workspace_id);
+                Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
+            }
             KeybindAction::SwitchTab(index) => {
                 let tabs = snapshot
                     .tabs
