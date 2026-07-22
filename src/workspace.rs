@@ -1131,6 +1131,31 @@ impl Workspace {
             .or_else(|| Some(self.identity_cwd.clone()))
     }
 
+    /// Workspace identity used for naming and git status. When `dynamic_naming`
+    /// is false, stays pinned to `identity_cwd` instead of following the live
+    /// pane cwd; see `[workspace] dynamic_naming`.
+    pub fn naming_identity_cwd(
+        &self,
+        dynamic_naming: bool,
+        terminals: &HashMap<TerminalId, TerminalState>,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+    ) -> Option<PathBuf> {
+        if dynamic_naming {
+            self.resolved_identity_cwd_from(terminals, terminal_runtimes)
+        } else {
+            Some(self.identity_cwd.clone())
+        }
+    }
+
+    /// Re-pin workspace identity to `cwd`, dropping any manual custom name so
+    /// the auto-derived label reflects the new directory. The cached git
+    /// identity stays stale until the next refresh, so callers should request
+    /// one with `App::request_git_identity_refresh`.
+    pub fn pin_identity_to(&mut self, cwd: PathBuf) {
+        self.custom_name = None;
+        self.identity_cwd = cwd;
+    }
+
     #[cfg(test)]
     pub fn display_name(&self) -> String {
         if let Some(name) = &self.custom_name {
@@ -1160,6 +1185,7 @@ impl Workspace {
 
     pub fn display_name_from(
         &self,
+        dynamic_naming: bool,
         terminals: &HashMap<TerminalId, TerminalState>,
         terminal_runtimes: &TerminalRuntimeRegistry,
     ) -> String {
@@ -1167,7 +1193,7 @@ impl Workspace {
             return name.clone();
         }
 
-        self.resolved_identity_cwd_from(terminals, terminal_runtimes)
+        self.naming_identity_cwd(dynamic_naming, terminals, terminal_runtimes)
             .map(|cwd| self.automatic_display_name_for_cwd(&cwd))
             .unwrap_or_else(|| "workspace".into())
     }
@@ -1799,11 +1825,59 @@ mod tests {
         );
         let terminal_runtimes = TerminalRuntimeRegistry::new();
 
-        assert_eq!(ws.display_name_from(&terminals, &terminal_runtimes), "pion");
+        assert_eq!(
+            ws.display_name_from(true, &terminals, &terminal_runtimes),
+            "pion"
+        );
         assert_eq!(
             ws.resolved_identity_cwd_from(&terminals, &terminal_runtimes),
             Some(PathBuf::from("/herdr-test/pion"))
         );
+    }
+
+    #[test]
+    fn naming_identity_cwd_stays_pinned_when_dynamic_naming_disabled() {
+        let mut ws = Workspace::test_new("ignored");
+        ws.custom_name = None;
+        ws.identity_cwd = PathBuf::from("/herdr-test/pinned");
+        let root_pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].terminal_id(root_pane).unwrap().clone();
+        let mut terminals = HashMap::new();
+        terminals.insert(
+            terminal_id.clone(),
+            TerminalState::new(terminal_id, PathBuf::from("/herdr-test/live")),
+        );
+        let terminal_runtimes = TerminalRuntimeRegistry::new();
+
+        assert_eq!(
+            ws.naming_identity_cwd(false, &terminals, &terminal_runtimes),
+            Some(PathBuf::from("/herdr-test/pinned"))
+        );
+        assert_eq!(
+            ws.naming_identity_cwd(true, &terminals, &terminal_runtimes),
+            Some(PathBuf::from("/herdr-test/live"))
+        );
+        assert_eq!(
+            ws.display_name_from(false, &terminals, &terminal_runtimes),
+            "pinned"
+        );
+        assert_eq!(
+            ws.display_name_from(true, &terminals, &terminal_runtimes),
+            "live"
+        );
+    }
+
+    #[test]
+    fn pin_identity_to_clears_custom_name_and_sets_identity_cwd() {
+        let mut ws = Workspace::test_new("ignored");
+        ws.set_custom_name("my-custom-name".into());
+        assert!(ws.custom_name.is_some());
+
+        ws.pin_identity_to(PathBuf::from("/herdr-test/refreshed"));
+
+        assert!(ws.custom_name.is_none());
+        assert_eq!(ws.identity_cwd, PathBuf::from("/herdr-test/refreshed"));
+        assert_eq!(ws.display_name(), "refreshed");
     }
 
     #[test]

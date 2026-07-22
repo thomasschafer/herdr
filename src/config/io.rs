@@ -15,6 +15,7 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "theme",
     "ui",
     "update",
+    "workspace",
     "worktrees",
 ];
 
@@ -315,6 +316,14 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut diagnostics,
         &mut invalid_sections,
         |section| config.advanced = section,
+    );
+    load_live_section(
+        table,
+        "workspace",
+        "workspace config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.workspace = section,
     );
     load_live_section(
         table,
@@ -859,6 +868,21 @@ resume_agents_on_restore = true
         .unwrap();
 
         assert!(loaded.config.session.resume_agents_on_restore);
+        assert!(loaded.diagnostics.is_empty());
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_parses_workspace_section() {
+        let loaded = load_live_config_from_str(
+            r#"
+[workspace]
+dynamic_naming = false
+"#,
+        )
+        .unwrap();
+
+        assert!(!loaded.config.workspace.dynamic_naming);
         assert!(loaded.diagnostics.is_empty());
         assert!(loaded.invalid_sections.is_empty());
     }

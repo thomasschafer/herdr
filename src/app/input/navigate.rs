@@ -221,6 +221,11 @@ impl App {
                     );
                 }
             }
+            NavigateAction::RefreshWorkspaceIdentity => {
+                if let Some(ws_idx) = workspace_action_target(&self.state, context) {
+                    self.refresh_workspace_identity_idx_via_api(ws_idx);
+                }
+            }
             NavigateAction::CloseWorkspace => {
                 if let Some(ws_idx) = workspace_action_target(&self.state, context) {
                     self.state.selected = ws_idx;
@@ -440,6 +445,11 @@ impl App {
     pub(crate) fn close_workspace_idx_via_api(&mut self, ws_idx: usize) {
         let workspace_id = self.public_workspace_id(ws_idx);
         self.runtime_workspace_close("tui.workspace.close", workspace_id);
+    }
+
+    pub(crate) fn refresh_workspace_identity_idx_via_api(&mut self, ws_idx: usize) {
+        let workspace_id = self.public_workspace_id(ws_idx);
+        self.runtime_workspace_refresh_identity("tui.key.workspace.refresh_identity", workspace_id);
     }
 
     pub(crate) fn move_workspace_via_api(&mut self, source_ws_idx: usize, insert_idx: usize) {
@@ -1378,6 +1388,7 @@ pub(crate) enum NavigateAction {
     OpenWorktree,
     RemoveWorktree,
     RenameWorkspace,
+    RefreshWorkspaceIdentity,
     CloseWorkspace,
     SwitchWorkspace(usize),
     SwitchTab(usize),
@@ -1527,6 +1538,10 @@ fn non_indexed_action_for_key(
         (&kb.open_worktree, NavigateAction::OpenWorktree),
         (&kb.remove_worktree, NavigateAction::RemoveWorktree),
         (&kb.rename_workspace, NavigateAction::RenameWorkspace),
+        (
+            &kb.refresh_workspace_identity,
+            NavigateAction::RefreshWorkspaceIdentity,
+        ),
         (&kb.close_workspace, NavigateAction::CloseWorkspace),
         (&kb.previous_workspace, NavigateAction::PreviousWorkspace),
         (&kb.next_workspace, NavigateAction::NextWorkspace),
@@ -1662,6 +1677,16 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::RenameWorkspace => {
             if let Some(ws_idx) = workspace_action_target(state, context) {
                 super::modal::open_rename_workspace(state, terminal_runtimes, ws_idx);
+            }
+        }
+        NavigateAction::RefreshWorkspaceIdentity => {
+            if let Some(ws_idx) = workspace_action_target(state, context) {
+                if let Some(cwd) = state.workspaces[ws_idx]
+                    .resolved_identity_cwd_from(&state.terminals, terminal_runtimes)
+                {
+                    state.workspaces[ws_idx].pin_identity_to(cwd);
+                }
+                leave_navigate_mode(state);
             }
         }
         NavigateAction::CloseWorkspace => {

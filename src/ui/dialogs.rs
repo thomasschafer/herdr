@@ -604,7 +604,13 @@ fn confirm_close_overlay_text(
     let ws_name = app
         .workspaces
         .get(app.selected)
-        .map(|ws| ws.display_name_from(&app.terminals, terminal_runtimes))
+        .map(|ws| {
+            ws.display_name_from(
+                app.dynamic_workspace_naming,
+                &app.terminals,
+                terminal_runtimes,
+            )
+        })
         .unwrap_or_else(|| "?".to_string());
     let selected_space = app
         .workspaces

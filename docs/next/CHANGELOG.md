@@ -92,6 +92,9 @@
 - Clients restore terminal state when they receive SIGHUP or SIGTERM. (#2041, thanks @MattJColes)
 - Windows now shows `system` notifications and completes MP3 notification sounds without leaving PowerShell players waiting for a timeout. (#1330)
 
+### Added
+- Added `workspace.dynamic_naming` to stop workspace names and git status from following the live directory of a workspace's root pane as it `cd`s around. When disabled, use the new `keys.refresh_workspace_identity` keybinding or `herdr workspace refresh-identity <workspace_id>` to explicitly re-pin a workspace's name and git status to its current directory.
+
 ## [0.7.5] - 2026-07-21
 
 ### Breaking Changes

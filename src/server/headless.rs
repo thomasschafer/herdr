@@ -1199,6 +1199,7 @@ impl HeadlessServer {
             &self.app.state.workspaces,
             &self.app.state.terminals,
             &self.app.terminal_runtimes,
+            self.app.state.dynamic_workspace_naming,
             self.app.state.active,
             self.app.state.selected,
             self.app.state.sidebar_width,
@@ -1903,8 +1904,11 @@ impl HeadlessServer {
             crate::app::state::ToastKind::Finished => "finished",
             crate::app::state::ToastKind::UpdateInstalled => "updated",
         };
-        let workspace_label =
-            ws.display_name_from(&self.app.state.terminals, &self.app.terminal_runtimes);
+        let workspace_label = ws.display_name_from(
+            self.app.state.dynamic_workspace_naming,
+            &self.app.state.terminals,
+            &self.app.terminal_runtimes,
+        );
         let context = crate::app::actions::notification_context(
             ws,
             &workspace_label,
@@ -3614,6 +3618,7 @@ impl HeadlessServer {
                             crate::app::state::ToastKind::UpdateInstalled => "updated",
                         };
                         let workspace_label = self.app.state.workspaces[*ws_idx].display_name_from(
+                            self.app.state.dynamic_workspace_naming,
                             &self.app.state.terminals,
                             &self.app.terminal_runtimes,
                         );

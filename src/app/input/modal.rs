@@ -375,8 +375,11 @@ pub(super) fn open_rename_workspace(
     state.pending_workspace_create_cwd = None;
     state.selected = ws_idx;
     state.rename_pane_target = None;
+    // Always suggest a name derived from the live pane cwd here, even when
+    // dynamic naming is disabled: this is a manual-entry aid based on "where
+    // you are right now," not the passive auto-naming behavior being pinned.
     state.name_input =
-        state.workspaces[ws_idx].display_name_from(&state.terminals, terminal_runtimes);
+        state.workspaces[ws_idx].display_name_from(true, &state.terminals, terminal_runtimes);
     state.name_input_replace_on_type = false;
     state.mode = Mode::RenameWorkspace;
 }

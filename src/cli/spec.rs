@@ -209,6 +209,11 @@ fn workspace_command() -> Command {
                 .arg(required("workspace_id", "WORKSPACE_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
+        .subcommand(id_command(
+            "refresh-identity",
+            "workspace_id",
+            "Re-pin workspace naming and git status to the live pane directory",
+        ))
         .subcommand(
             Command::new("report-metadata")
                 .about("Report display-only workspace metadata")

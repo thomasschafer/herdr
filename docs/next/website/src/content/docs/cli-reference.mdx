@@ -120,6 +120,7 @@ herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [
 herdr workspace get <workspace_id>
 herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
+herdr workspace refresh-identity <workspace_id>
 herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]
 herdr workspace close <workspace_id>
 ```
@@ -131,6 +132,12 @@ herdr workspace create --cwd ~/project --label api --no-focus
 ```
 
 A workspace is the top-level project or work context. Creating one also creates its first tab and root pane. The JSON response exposes their IDs as `.result.workspace.workspace_id`, `.result.tab.tab_id`, and `.result.root_pane.pane_id`.
+
+`workspace refresh-identity` re-pins a workspace's auto-derived name and git status to the
+live directory of its first tab's root pane, clearing any manual custom name. It matters
+when `[workspace] dynamic_naming` is `false` (see [Configuration](/docs/configuration/#workspace-naming)),
+since the name and git status otherwise stay pinned to wherever the workspace last had its
+identity set.
 
 ## Worktrees
 

@@ -1491,6 +1491,7 @@ mod tests {
             &app.state.workspaces,
             &app.state.terminals,
             &app.terminal_runtimes,
+            app.state.dynamic_workspace_naming,
             app.state.active,
             app.state.selected,
             app.state.sidebar_width,

@@ -254,6 +254,12 @@
           "description": "Rename the selected workspace."
         },
         {
+          "key": "keys.refresh_workspace_identity",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Re-pin the selected workspace's name and git status to its live pane directory (see workspace.dynamic_naming). Unset by default."
+        },
+        {
           "key": "keys.close_workspace",
           "type": "keybinding",
           "default": "\"prefix+shift+d\"",
@@ -1060,6 +1066,18 @@
           "type": "boolean",
           "default": "true",
           "description": "Resume supported AI-agent panes into their native conversation sessions when restoring a Herdr session."
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "title": "Workspace naming",
+      "keys": [
+        {
+          "key": "workspace.dynamic_naming",
+          "type": "boolean",
+          "default": "true",
+          "description": "Track the live pane directory for workspace naming and git status as it changes. When false, the name and git status stay pinned to the directory a workspace was created (or last refreshed) with."
         }
       ]
     },

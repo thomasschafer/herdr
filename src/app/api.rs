@@ -396,7 +396,11 @@ impl App {
             return;
         }
 
-        let workspace_label = ws.display_name_from(&self.state.terminals, &self.terminal_runtimes);
+        let workspace_label = ws.display_name_from(
+            self.state.dynamic_workspace_naming,
+            &self.state.terminals,
+            &self.terminal_runtimes,
+        );
         let context = crate::app::actions::notification_context(
             ws,
             &workspace_label,
@@ -682,8 +686,11 @@ impl App {
                 ToastKind::Finished => "finished",
                 ToastKind::UpdateInstalled => "updated",
             };
-            let workspace_label =
-                ws.display_name_from(&self.state.terminals, &self.terminal_runtimes);
+            let workspace_label = ws.display_name_from(
+                self.state.dynamic_workspace_naming,
+                &self.state.terminals,
+                &self.terminal_runtimes,
+            );
             let _ = notify(
                 &format!("{} {}", agent_label, event_text),
                 Some(&crate::app::actions::notification_context(
@@ -753,8 +760,11 @@ impl App {
                 continue;
             };
             let ws = &self.state.workspaces[ws_idx];
-            let workspace_label =
-                ws.display_name_from(&self.state.terminals, &self.terminal_runtimes);
+            let workspace_label = ws.display_name_from(
+                self.state.dynamic_workspace_naming,
+                &self.state.terminals,
+                &self.terminal_runtimes,
+            );
             let context = crate::app::actions::notification_context(
                 ws,
                 &workspace_label,
@@ -984,6 +994,9 @@ impl App {
             }
             Method::WorkspaceRename(params) => {
                 return self.handle_workspace_rename(request.id, params);
+            }
+            Method::WorkspaceRefreshIdentity(target) => {
+                return self.handle_workspace_refresh_identity(request.id, target);
             }
             Method::WorkspaceMove(params) => {
                 return self.handle_workspace_move(request.id, params);

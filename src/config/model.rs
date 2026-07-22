@@ -311,6 +311,7 @@ pub struct Config {
     pub update: UpdateConfig,
     pub keys: KeysConfig,
     pub ui: UiConfig,
+    pub workspace: WorkspaceConfig,
     pub worktrees: WorktreesConfig,
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
@@ -342,6 +343,9 @@ pub struct KeysConfig {
     pub remove_worktree: BindingConfig,
     /// Rename the selected workspace. Default: "prefix+shift+w"
     pub rename_workspace: BindingConfig,
+    /// Re-pin the selected workspace's name and git status to its live pane
+    /// directory (see `[workspace] dynamic_naming`). Unset by default.
+    pub refresh_workspace_identity: BindingConfig,
     /// Close the selected workspace. Default: "prefix+shift+d"
     pub close_workspace: BindingConfig,
     /// Open the workspace navigation surface. Default: "prefix+w"
@@ -465,6 +469,8 @@ pub(crate) struct KeysConfigOverlay {
     remove_worktree: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rename_workspace: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_workspace_identity: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     close_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -590,6 +596,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(open_worktree);
         apply_field!(remove_worktree);
         apply_field!(rename_workspace);
+        apply_field!(refresh_workspace_identity);
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
         apply_field!(goto);
@@ -690,6 +697,10 @@ impl KeysConfig {
         copy_effective_action_field!(open_worktree, keybinds.open_worktree);
         copy_effective_action_field!(remove_worktree, keybinds.remove_worktree);
         copy_effective_action_field!(rename_workspace, keybinds.rename_workspace);
+        copy_effective_action_field!(
+            refresh_workspace_identity,
+            keybinds.refresh_workspace_identity
+        );
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
@@ -807,6 +818,15 @@ pub enum TabBarPositionConfig {
     #[default]
     Top,
     Bottom,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct WorkspaceConfig {
+    /// Track the live pane directory for workspace naming and git status as it
+    /// changes. When false, the name and git status stay pinned to the
+    /// directory a workspace was created (or last refreshed) with. Default: true.
+    pub dynamic_naming: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -975,6 +995,7 @@ impl Default for KeysConfig {
             open_worktree: BindingConfig::empty(),
             remove_worktree: BindingConfig::empty(),
             rename_workspace: BindingConfig::one("prefix+shift+w"),
+            refresh_workspace_identity: BindingConfig::empty(),
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
@@ -1033,6 +1054,14 @@ impl Default for WorktreesConfig {
     fn default() -> Self {
         Self {
             directory: "~/.herdr/worktrees".into(),
+        }
+    }
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            dynamic_naming: true,
         }
     }
 }
@@ -1371,6 +1400,19 @@ prompt_new_workspace_name = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.ui.prompt_new_workspace_name);
+    }
+
+    #[test]
+    fn dynamic_naming_defaults_on_and_parses() {
+        let default_config = Config::default();
+        assert!(default_config.workspace.dynamic_naming);
+
+        let toml = r#"
+[workspace]
+dynamic_naming = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.workspace.dynamic_naming);
     }
 
     #[test]

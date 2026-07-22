@@ -495,7 +495,11 @@ impl App {
         crate::api::schema::WorkspaceInfo {
             workspace_id: self.public_workspace_id(index),
             number: index + 1,
-            label: ws.display_name_from(&self.state.terminals, &self.terminal_runtimes),
+            label: ws.display_name_from(
+                self.state.dynamic_workspace_naming,
+                &self.state.terminals,
+                &self.terminal_runtimes,
+            ),
             focused: self.state.active == Some(index),
             pane_count: ws.public_pane_numbers.len(),
             tab_count: ws.tabs.len(),

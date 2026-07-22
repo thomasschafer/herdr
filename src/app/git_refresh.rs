@@ -119,8 +119,11 @@ impl App {
             .workspaces
             .iter()
             .filter_map(|ws| {
-                let cwd =
-                    ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)?;
+                let cwd = ws.naming_identity_cwd(
+                    self.state.dynamic_workspace_naming,
+                    &self.state.terminals,
+                    &self.terminal_runtimes,
+                )?;
                 let cache_key_hint = (!refresh_repo_discovery && ws.cached_identity_cwd == cwd)
                     .then(|| ws.cached_git_status_key.clone());
                 Some(WorkspaceGitRefreshItem {
@@ -299,6 +302,29 @@ mod tests {
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].cache_key_hint, None);
+    }
+
+    #[test]
+    fn git_refresh_items_pin_to_identity_cwd_when_dynamic_naming_disabled() {
+        let mut app = test_app(&crate::config::Config::default());
+        app.state.dynamic_workspace_naming = false;
+        let mut ws = Workspace::test_new("test");
+        ws.identity_cwd = PathBuf::from("/herdr-test/pinned");
+        let root_pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].terminal_id(root_pane).unwrap().clone();
+        app.state.terminals.insert(
+            terminal_id.clone(),
+            crate::terminal::TerminalState::new(terminal_id, PathBuf::from("/herdr-test/live")),
+        );
+        app.state.workspaces.push(ws);
+
+        let items = app.workspace_git_refresh_items(false);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].resolved_identity_cwd,
+            PathBuf::from("/herdr-test/pinned")
+        );
     }
 
     #[test]

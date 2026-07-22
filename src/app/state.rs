@@ -1500,6 +1500,10 @@ pub struct AppState {
     pub confirm_close: bool,
     pub prompt_new_tab_name: bool,
     pub prompt_new_workspace_name: bool,
+    /// Track the live pane directory for workspace naming and git status.
+    /// When false, naming/status stay pinned to `Workspace::identity_cwd`
+    /// until explicitly refreshed. See `[workspace] dynamic_naming`.
+    pub dynamic_workspace_naming: bool,
     pub pane_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
@@ -1870,6 +1874,7 @@ impl AppState {
             confirm_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
+            dynamic_workspace_naming: true,
             pane_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,

@@ -151,7 +151,11 @@ fn collect_agent_panel_entries_with_runtimes(
         .enumerate()
         .flat_map(|(ws_idx, ws)| {
             let multi_tab = ws.tabs.len() > 1;
-            let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
+            let workspace_label = ws.display_name_from(
+                app.dynamic_workspace_naming,
+                &app.terminals,
+                terminal_runtimes,
+            );
             ws.pane_details(&app.terminals)
                 .into_iter()
                 .map(move |detail| {
@@ -1252,7 +1256,11 @@ fn render_workspace_list(
             Style::default().fg(p.subtext0)
         };
 
-        let label = ws.display_name_from(&app.terminals, terminal_runtimes);
+        let label = ws.display_name_from(
+            app.dynamic_workspace_naming,
+            &app.terminals,
+            terminal_runtimes,
+        );
         let display_label = if card.indented {
             grouped_child_display_label(&label, ws.branch().as_deref(), ws.custom_name.is_some())
         } else {

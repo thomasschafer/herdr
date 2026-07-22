@@ -183,6 +183,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_worktree = ""    # optional, unset by default
 # remove_worktree = ""  # optional, unset by default; opens confirmation
 # rename_workspace = "prefix+shift+w"
+# refresh_workspace_identity = "" # optional, unset by default; see [workspace] dynamic_naming
 # close_workspace = "prefix+shift+d"
 # previous_workspace = "" # optional, unset by default
 # next_workspace = ""     # optional, unset by default
@@ -243,6 +244,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # tabs = ""       # e.g. "ctrl" makes ctrl+1..9 switch tabs directly
 # workspaces = "" # e.g. "ctrl+shift" makes ctrl+shift+1..9 switch workspaces directly
 # agents = ""     # e.g. "alt" makes alt+1..9 focus agent rows directly
+
+# [workspace]
+# Track the live pane directory for workspace naming and git status as it changes.
+# Set false to pin the name/status to the directory a workspace was created (or last
+# refreshed with the refresh_workspace_identity keybind/CLI command) with.
+# dynamic_naming = true
 
 # [worktrees]
 # directory = "~/.herdr/worktrees"
