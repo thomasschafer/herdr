@@ -42,6 +42,13 @@ pub(super) fn workspace_rename(params: WorkspaceRenameParams) -> std::io::Result
     print_method_response("cli:workspace:rename", Method::WorkspaceRename(params))
 }
 
+pub(super) fn workspace_refresh_identity(workspace_id: String) -> std::io::Result<i32> {
+    print_method_response(
+        "cli:workspace:refresh_identity",
+        Method::WorkspaceRefreshIdentity(WorkspaceTarget { workspace_id }),
+    )
+}
+
 pub(super) fn workspace_close(workspace_id: String) -> std::io::Result<i32> {
     print_method_response(
         "cli:workspace:close",

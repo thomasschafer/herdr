@@ -256,6 +256,7 @@ pub fn capture(
         crate::terminal::TerminalState,
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    dynamic_naming: bool,
     active: Option<usize>,
     selected: usize,
     sidebar_width: u16,
@@ -266,7 +267,9 @@ pub fn capture(
         version: SNAPSHOT_VERSION,
         workspaces: workspaces
             .iter()
-            .map(|workspace| capture_workspace(workspace, terminals, terminal_runtimes))
+            .map(|workspace| {
+                capture_workspace(workspace, terminals, terminal_runtimes, dynamic_naming)
+            })
             .collect(),
         active,
         selected,
@@ -283,13 +286,20 @@ fn capture_workspace(
         crate::terminal::TerminalState,
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    dynamic_naming: bool,
 ) -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
-        identity_cwd: ws
-            .resolved_identity_cwd_from(terminals, terminal_runtimes)
-            .unwrap_or_else(|| ws.identity_cwd.clone()),
+        // When dynamic naming is off, identity_cwd is the pinned source of
+        // truth and must not be overwritten with the live pane cwd here, or
+        // the pin would silently reset on every autosave.
+        identity_cwd: if dynamic_naming {
+            ws.resolved_identity_cwd_from(terminals, terminal_runtimes)
+                .unwrap_or_else(|| ws.identity_cwd.clone())
+        } else {
+            ws.identity_cwd.clone()
+        },
         worktree_space: ws.worktree_space.clone(),
         public_pane_numbers: ws
             .public_pane_numbers
@@ -536,6 +546,7 @@ mod tests {
             &state.workspaces,
             &state.terminals,
             terminal_runtimes,
+            state.dynamic_workspace_naming,
             state.active,
             state.selected,
             state.sidebar_width,
@@ -1021,6 +1032,27 @@ mod tests {
         assert_eq!(workspace.identity_cwd, PathBuf::from("/tmp/pion"));
         assert_eq!(tab.panes[&root.raw()].cwd, PathBuf::from("/tmp/pion"));
         assert_eq!(tab.panes[&second.raw()].cwd, PathBuf::from("/tmp/herdr"));
+    }
+
+    #[test]
+    fn capture_keeps_pinned_identity_cwd_when_dynamic_naming_disabled() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.dynamic_workspace_naming = false;
+        state.workspaces[0].identity_cwd = PathBuf::from("/tmp/pinned");
+        state.ensure_test_terminals();
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let root_terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&root_terminal_id).unwrap().cwd =
+            PathBuf::from("/tmp/live-elsewhere");
+
+        let snapshot = capture_from_state(&state);
+
+        assert_eq!(
+            snapshot.workspaces[0].identity_cwd,
+            PathBuf::from("/tmp/pinned")
+        );
     }
 
     #[tokio::test]

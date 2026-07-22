@@ -79,6 +79,24 @@ new_cwd = "follow"
 
 `new_cwd = "follow"` keeps the default behavior and inherits the source pane or workspace. When there is no source workspace, Herdr starts in `$HOME`. Use `"home"` to always start in `$HOME`, `"current"` to use Herdr's process directory, or a fixed path such as `"~/Projects"`. Explicit `--cwd` values from the CLI or socket API still take precedence.
 
+## Workspace naming
+
+By default, a workspace's auto-derived name (and the git branch/status shown next to it)
+tracks the live directory of its first tab's root pane — the name changes as soon as that
+pane `cd`s across a Git repo boundary. Disable this to keep the name and git status pinned
+to the directory a workspace was created (or last refreshed) with:
+
+```toml
+[workspace]
+dynamic_naming = false
+```
+
+With `dynamic_naming = false`, use the `refresh_workspace_identity` keybinding or
+`herdr workspace refresh-identity <workspace_id>` to explicitly re-pin a workspace's name
+and git status to wherever its root pane currently is. Refreshing also clears any manual
+custom name. A manually-set custom name (`Rename workspace`) always overrides the
+auto-derived name regardless of this setting.
+
 ## Worktrees
 
 Set the root directory Herdr uses for Git worktree checkouts created from the sidebar:

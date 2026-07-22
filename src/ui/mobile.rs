@@ -342,7 +342,11 @@ fn render_header_status(
             Span::raw(" "),
             Span::styled(
                 truncate_end(
-                    &ws.display_name_from(&app.terminals, terminal_runtimes),
+                    &ws.display_name_from(
+                        app.dynamic_workspace_naming,
+                        &app.terminals,
+                        terminal_runtimes,
+                    ),
                     name_w.saturating_sub(4) as usize,
                 ),
                 Style::default()
@@ -620,7 +624,11 @@ fn render_mobile_switcher_content(
 
         title_spans.push(Span::styled(dot, dot_style.bg(bg)));
         title_spans.push(Span::styled(" ", Style::default().bg(bg)));
-        let raw_label = ws.display_name_from(&app.terminals, terminal_runtimes);
+        let raw_label = ws.display_name_from(
+            app.dynamic_workspace_naming,
+            &app.terminals,
+            terminal_runtimes,
+        );
         let name = if *indented {
             grouped_child_display_label(
                 &raw_label,

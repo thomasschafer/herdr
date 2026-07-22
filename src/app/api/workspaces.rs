@@ -118,6 +118,59 @@ impl App {
         )
     }
 
+    /// Re-pin workspace identity (name + git status source) to the live cwd
+    /// of the workspace's first tab, dropping any manual custom name. Used
+    /// to force an update when `[workspace] dynamic_naming` is disabled.
+    pub(super) fn handle_workspace_refresh_identity(
+        &mut self,
+        id: String,
+        target: WorkspaceTarget,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&target.workspace_id) else {
+            return workspace_not_found(id, &target.workspace_id);
+        };
+        let Some(ws) = self.state.workspaces.get(index) else {
+            return workspace_not_found(id, &target.workspace_id);
+        };
+        let Some(cwd) =
+            ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+        else {
+            return encode_error(
+                id,
+                "workspace_refresh_identity_failed",
+                "workspace has no resolvable directory".to_string(),
+            );
+        };
+
+        self.state.workspaces[index].pin_identity_to(cwd);
+        let ws = &self.state.workspaces[index];
+        let label = ws.display_name_from(
+            self.state.dynamic_workspace_naming,
+            &self.state.terminals,
+            &self.terminal_runtimes,
+        );
+        crate::logging::workspace_renamed(&ws.id);
+
+        // Re-pinning changes the workspace's git identity, so force a discovery
+        // pass even when no sidebar token demands git status.
+        self.request_git_identity_refresh(std::time::Instant::now());
+        self.schedule_session_save();
+        self.emit_event(EventEnvelope {
+            event: EventKind::WorkspaceRenamed,
+            data: EventData::WorkspaceRenamed {
+                workspace_id: self.public_workspace_id(index),
+                label,
+            },
+        });
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
     pub(super) fn handle_workspace_move(
         &mut self,
         id: String,
@@ -434,6 +487,46 @@ mod tests {
         );
         shutdown_test_runtimes(&mut app);
         let _ = std::fs::remove_dir_all(&focused_cwd);
+    }
+
+    #[tokio::test]
+    async fn workspace_refresh_identity_pins_to_live_cwd_and_clears_custom_name() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut ws = Workspace::test_new("spaces");
+        ws.set_custom_name("custom".into());
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+
+        let root_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(root_pane)
+            .cloned()
+            .unwrap();
+        let live_cwd = std::path::PathBuf::from("/herdr-test/refresh-target");
+        app.state.terminals.get_mut(&terminal_id).unwrap().cwd = live_cwd.clone();
+
+        let workspace_id = app.public_workspace_id(0);
+        let response = app.handle_workspace_refresh_identity(
+            "req".into(),
+            crate::api::schema::WorkspaceTarget { workspace_id },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceInfo { .. }
+        ));
+
+        assert!(app.state.workspaces[0].custom_name.is_none());
+        assert_eq!(app.state.workspaces[0].identity_cwd, live_cwd);
     }
 
     fn app_with_linked_worktree() -> App {

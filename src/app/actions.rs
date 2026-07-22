@@ -467,7 +467,11 @@ impl AppState {
         let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
-            let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
+            let workspace_label = ws.display_name_from(
+                self.dynamic_workspace_naming,
+                &self.terminals,
+                terminal_runtimes,
+            );
             let activity = workspace_activity_summary(ws, &self.terminals);
             let workspace_search_text = format!("{workspace_label} {activity}").to_lowercase();
             let workspace_matches = match query_kind {
@@ -2825,7 +2829,11 @@ impl AppState {
             };
 
             if self.workspaces[ws_idx]
-                .resolved_identity_cwd_from(&self.terminals, terminal_runtimes)
+                .naming_identity_cwd(
+                    self.dynamic_workspace_naming,
+                    &self.terminals,
+                    terminal_runtimes,
+                )
                 .as_ref()
                 != Some(&result.resolved_identity_cwd)
             {
@@ -4291,6 +4299,43 @@ mod tests {
 
         assert!(!changed);
         assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn apply_workspace_git_statuses_uses_pinned_identity_when_dynamic_naming_disabled() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.dynamic_workspace_naming = false;
+        let workspace_id = state.workspaces[0].id.clone();
+        let pinned_cwd = state.workspaces[0].identity_cwd.clone();
+
+        // Simulate the root pane having cd'd away from the pinned directory;
+        // the staleness guard must still match against the pin, not this.
+        let root_pane = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0]
+            .terminal_id(root_pane)
+            .unwrap()
+            .clone();
+        state.terminals.get_mut(&terminal_id).unwrap().cwd =
+            std::path::PathBuf::from("/herdr-test/live-elsewhere");
+
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let changed = state.apply_workspace_git_statuses(
+            &terminal_runtimes,
+            vec![WorkspaceGitStatus {
+                workspace_id,
+                resolved_identity_cwd: pinned_cwd.clone(),
+                status_cache_key: pinned_cwd,
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "one".into(),
+                branch: Some("main".into()),
+                ahead_behind: Some((2, 1)),
+                space: None,
+            }],
+        );
+
+        assert!(changed);
+        assert_eq!(state.workspaces[0].branch().as_deref(), Some("main"));
+        assert_eq!(state.workspaces[0].git_ahead_behind(), Some((2, 1)));
     }
 
     #[test]

@@ -45,6 +45,17 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::WorkspaceRename(params))
     }
 
+    pub(crate) fn runtime_workspace_refresh_identity(
+        &mut self,
+        id: &'static str,
+        workspace_id: String,
+    ) -> String {
+        self.dispatch_runtime_mutation(
+            id,
+            Method::WorkspaceRefreshIdentity(WorkspaceTarget { workspace_id }),
+        )
+    }
+
     pub(crate) fn runtime_workspace_move(
         &mut self,
         id: &'static str,
