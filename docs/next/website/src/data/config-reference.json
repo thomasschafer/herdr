@@ -530,6 +530,12 @@
           "description": "Rename the selected workspace."
         },
         {
+          "key": "keys.refresh_workspace_identity",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Re-pin the selected workspace's name and git status to its live pane directory (see workspace.dynamic_naming). Unset by default."
+        },
+        {
           "key": "keys.close_workspace",
           "type": "keybinding",
           "default": "\"prefix+shift+d\"",
@@ -1453,6 +1459,18 @@
           "type": "integer",
           "default": "100",
           "description": "Milliseconds between automatic agent restores after a server restart. The first agent starts without this delay; 0 disables spacing. Does not delay manual launches or explicit terminal attaches. Restart the server to apply."
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "title": "Workspace naming",
+      "keys": [
+        {
+          "key": "workspace.dynamic_naming",
+          "type": "boolean",
+          "default": "true",
+          "description": "Track the live pane directory for workspace naming and git status as it changes. When false, the name and git status stay pinned to the directory a workspace was created (or last refreshed) with."
         }
       ]
     },

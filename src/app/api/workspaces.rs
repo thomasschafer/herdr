@@ -131,6 +131,53 @@ impl App {
         )
     }
 
+    pub(super) fn handle_workspace_refresh_identity(
+        &mut self,
+        id: String,
+        target: WorkspaceTarget,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&target.workspace_id) else {
+            return workspace_not_found(id, &target.workspace_id);
+        };
+        let Some(workspace) = self.state.workspaces.get(index) else {
+            return workspace_not_found(id, &target.workspace_id);
+        };
+        let Some(cwd) =
+            workspace.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+        else {
+            return encode_error(
+                id,
+                "workspace_refresh_identity_failed",
+                "workspace has no resolvable directory",
+            );
+        };
+
+        self.state.workspaces[index].pin_identity_to(cwd);
+        let workspace = &self.state.workspaces[index];
+        let label = workspace.display_name_from(
+            self.state.dynamic_workspace_naming,
+            &self.state.terminals,
+            &self.terminal_runtimes,
+        );
+        crate::logging::workspace_renamed(&workspace.id);
+        self.request_git_identity_refresh(std::time::Instant::now());
+        self.schedule_session_save();
+        self.emit_event(EventEnvelope {
+            event: EventKind::WorkspaceRenamed,
+            data: EventData::WorkspaceRenamed {
+                workspace_id: self.public_workspace_id(index),
+                label,
+            },
+        });
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
     pub(super) fn handle_workspace_move(
         &mut self,
         id: String,

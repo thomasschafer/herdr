@@ -267,6 +267,7 @@ pub fn capture(
         crate::terminal::TerminalState,
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    dynamic_naming: bool,
     active: Option<usize>,
     selected: usize,
 ) -> SessionSnapshot {
@@ -274,7 +275,9 @@ pub fn capture(
         version: SNAPSHOT_VERSION,
         workspaces: workspaces
             .iter()
-            .map(|workspace| capture_workspace(workspace, terminals, terminal_runtimes))
+            .map(|workspace| {
+                capture_workspace(workspace, terminals, terminal_runtimes, dynamic_naming)
+            })
             .collect(),
         active,
         selected,
@@ -291,17 +294,21 @@ fn capture_workspace(
         crate::terminal::TerminalState,
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    dynamic_naming: bool,
 ) -> WorkspaceSnapshot {
     let tabs: Vec<_> = ws
         .tabs
         .iter()
         .map(|tab| capture_tab(tab, terminals, terminal_runtimes))
         .collect();
-    let identity_cwd = tabs
-        .first()
-        .and_then(|tab| tab.root_pane.and_then(|id| tab.panes.get(&id)))
-        .map(|pane| pane.cwd.clone())
-        .unwrap_or_else(|| ws.identity_cwd.clone());
+    let identity_cwd = if dynamic_naming {
+        tabs.first()
+            .and_then(|tab| tab.root_pane.and_then(|id| tab.panes.get(&id)))
+            .map(|pane| pane.cwd.clone())
+            .unwrap_or_else(|| ws.identity_cwd.clone())
+    } else {
+        ws.identity_cwd.clone()
+    };
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
@@ -574,6 +581,7 @@ mod tests {
             &state.workspaces,
             &state.terminals,
             terminal_runtimes,
+            state.dynamic_workspace_naming,
             state.active,
             state.selected,
         )

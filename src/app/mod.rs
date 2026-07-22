@@ -535,6 +535,7 @@ impl App {
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
+            dynamic_workspace_naming: config.workspace.dynamic_naming,
             pane_borders: config.ui.pane_borders,
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
@@ -928,6 +929,10 @@ impl App {
                 "session.startup_per_agent_delay_ms changes require restarting Herdr; kept current setting"
                     .into(),
             );
+        }
+
+        if !invalid_section("workspace") {
+            self.state.dynamic_workspace_naming = config.workspace.dynamic_naming;
         }
 
         let graphics_config_valid = !invalid_section("terminal")

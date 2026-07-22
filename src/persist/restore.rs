@@ -1477,7 +1477,8 @@ mod tests {
                 Arc::new(RenderSignal::new()),
             );
             let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
-            let captured = crate::persist::capture(&workspaces, &terminals, &runtimes, Some(0), 0);
+            let captured =
+                crate::persist::capture(&workspaces, &terminals, &runtimes, true, Some(0), 0);
             assert_eq!(
                 captured.workspaces.len(),
                 2,
@@ -1985,7 +1986,8 @@ mod tests {
             );
             assert_eq!(terminal.state, state_before_handoff);
             let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
-            let snapshot = crate::persist::capture(&workspaces, &terminals, &runtimes, Some(0), 0);
+            let snapshot =
+                crate::persist::capture(&workspaces, &terminals, &runtimes, true, Some(0), 0);
             let pane_id = workspaces[0].tabs[0].panes.keys().next().copied().unwrap();
             let runtime = runtimes.values().next().unwrap();
             runtime

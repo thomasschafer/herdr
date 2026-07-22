@@ -73,6 +73,7 @@ impl HeadlessServer {
             &self.app.state.workspaces,
             &self.app.state.terminals,
             &self.app.terminal_runtimes,
+            self.app.state.dynamic_workspace_naming,
             self.app.state.active,
             self.app.state.selected,
         );

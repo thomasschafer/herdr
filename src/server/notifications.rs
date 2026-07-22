@@ -42,7 +42,11 @@ pub(crate) fn toast_message_from_state_change(
                     prev_state,
                     new_state,
                 )?;
-                let workspace_label = ws.display_name_from(&state.terminals, terminal_runtimes);
+                let workspace_label = ws.display_name_from(
+                    state.dynamic_workspace_naming,
+                    &state.terminals,
+                    terminal_runtimes,
+                );
                 Some(format!(
                     "{} {}: {}",
                     agent_label,

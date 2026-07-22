@@ -86,8 +86,11 @@ impl HeadlessServer {
         };
         let workspace_id = workspace.id.clone();
         let tab_id = crate::workspace::public_tab_id_for_number(&workspace_id, tab_number);
-        let workspace_label =
-            workspace.display_name_from(&self.app.state.terminals, &self.app.terminal_runtimes);
+        let workspace_label = workspace.display_name_from(
+            self.app.state.dynamic_workspace_naming,
+            &self.app.state.terminals,
+            &self.app.terminal_runtimes,
+        );
         let context =
             crate::app::actions::notification_context(workspace, &workspace_label, ws_idx, pane_id);
         let agent = known_agent
@@ -157,8 +160,11 @@ impl HeadlessServer {
             crate::app::state::ToastKind::Finished => "finished",
             crate::app::state::ToastKind::UpdateInstalled => "updated",
         };
-        let workspace_label =
-            ws.display_name_from(&self.app.state.terminals, &self.app.terminal_runtimes);
+        let workspace_label = ws.display_name_from(
+            self.app.state.dynamic_workspace_naming,
+            &self.app.state.terminals,
+            &self.app.terminal_runtimes,
+        );
         let context = crate::app::actions::notification_context(
             ws,
             &workspace_label,

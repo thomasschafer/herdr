@@ -278,6 +278,7 @@ impl HeadlessServer {
                 | Method::WorkspaceMove(_)
                 | Method::WorkspaceMoveBlock(_)
                 | Method::WorkspaceRename(_)
+                | Method::WorkspaceRefreshIdentity(_)
                 | Method::WorktreeCreate(_)
                 | Method::WorktreeOpen(_)
                 | Method::WorktreeRemove(_)

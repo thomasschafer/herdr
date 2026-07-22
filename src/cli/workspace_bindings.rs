@@ -125,7 +125,7 @@ impl Leaf {
     }
 }
 
-pub(crate) const LEAVES: [Leaf; 7] = [
+pub(crate) const LEAVES: [Leaf; 8] = [
     Leaf {
         name: "list",
         about: "List workspaces",
@@ -172,6 +172,16 @@ pub(crate) const LEAVES: [Leaf; 7] = [
         arguments: WorkspaceRenameProjection::arguments,
         method: |matches| {
             WorkspaceRenameProjection::from_matches(matches).map(Method::WorkspaceRename)
+        },
+    },
+    Leaf {
+        name: "refresh-identity",
+        about: "Re-pin workspace naming and git status to the live pane directory",
+        id: "cli:workspace:refresh_identity",
+        quiet: false,
+        arguments: WorkspaceTargetProjection::arguments,
+        method: |matches| {
+            WorkspaceTargetProjection::from_matches(matches).map(Method::WorkspaceRefreshIdentity)
         },
     },
     Leaf {
