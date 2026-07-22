@@ -3307,6 +3307,7 @@ impl HeadlessServer {
                             crate::app::state::ToastKind::UpdateInstalled => "updated",
                         };
                         let workspace_label = self.app.state.workspaces[*ws_idx].display_name_from(
+                            self.app.state.dynamic_workspace_naming,
                             &self.app.state.terminals,
                             &self.app.terminal_runtimes,
                         );

@@ -126,6 +126,10 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.rename_workspace),
                     "rename workspace",
                 ),
+                entry(
+                    binding_label(&keybinds.refresh_workspace_identity),
+                    "refresh workspace identity",
+                ),
                 entry(binding_label(&keybinds.close_workspace), "close workspace"),
                 entry(
                     binding_label(&keybinds.previous_workspace),

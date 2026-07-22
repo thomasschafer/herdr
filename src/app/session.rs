@@ -45,6 +45,7 @@ impl App {
                 &self.state.workspaces,
                 &self.state.terminals,
                 &self.terminal_runtimes,
+                self.state.dynamic_workspace_naming,
                 self.state.active,
                 self.state.selected,
             );

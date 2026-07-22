@@ -154,6 +154,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_worktree = ""    # optional, unset by default
 # remove_worktree = ""  # optional, unset by default; opens confirmation
 # rename_workspace = "prefix+shift+w"
+# refresh_workspace_identity = "" # optional; see [workspace] dynamic_naming
 # close_workspace = "prefix+shift+d"
 # previous_workspace = "" # optional, unset by default
 # next_workspace = ""     # optional, unset by default
@@ -227,6 +228,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 [server]
 # headless_cols = 120
 # headless_rows = 40
+
+[workspace]
+# dynamic_naming = true
 
 # [worktrees]
 # directory = "~/.herdr/worktrees"

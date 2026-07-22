@@ -105,6 +105,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if action == crate::input::KeybindAction::RefreshWorkspaceIdentity {
+                    if let Some(workspace_id) = self.workspace_action_id() {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::WorkspaceRefreshIdentity(
+                                crate::api::schema::WorkspaceTarget { workspace_id },
+                            ),
+                            outcome,
+                        );
+                    }
+                    return;
+                }
                 if action == crate::input::KeybindAction::CloseWorkspace {
                     if let Some(workspace_id) = self.workspace_action_id() {
                         if self.config.confirm_close {
@@ -1120,9 +1131,7 @@ impl ClientShellState {
                         snapshot
                             .panes
                             .iter()
-                            .find(|pane| {
-                                pane.tab_id == focused_tab && pane.pane_id != focused_pane
-                            })
+                            .find(|pane| pane.tab_id == focused_tab && pane.pane_id != focused_pane)
                             .map(|pane| pane.pane_id.clone())
                     })?;
                 Some(Method::PaneFocus(PaneTarget { pane_id }))

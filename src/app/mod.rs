@@ -489,6 +489,7 @@ impl App {
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
+            dynamic_workspace_naming: config.workspace.dynamic_naming,
             pane_borders: config.ui.pane_borders,
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
@@ -855,6 +856,10 @@ impl App {
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
             }
+        }
+
+        if !invalid_section("workspace") {
+            self.state.dynamic_workspace_naming = config.workspace.dynamic_naming;
         }
 
         let graphics_config_valid = !invalid_section("terminal")
