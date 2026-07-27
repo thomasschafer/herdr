@@ -702,6 +702,39 @@ fn keyboard_copy_mode_content_motion_is_endpoint_backed_and_stale_safe() {
 }
 
 #[test]
+fn copy_mode_viewport_jumps_stay_within_the_visible_pane() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 2,
+        max_offset_from_bottom: 4,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    state.handle_input_bytes(b"\x02[");
+
+    state.handle_input_bytes(b"H");
+    assert_eq!(
+        state.copy_mode.as_ref().map(|mode| mode.cursor.row),
+        Some(2)
+    );
+
+    state.handle_input_bytes(b"L");
+    assert_eq!(
+        state.copy_mode.as_ref().map(|mode| mode.cursor.row),
+        Some(3)
+    );
+
+    state.handle_input_bytes(b"M");
+    assert_eq!(
+        state.copy_mode.as_ref().map(|mode| mode.cursor.row),
+        Some(2)
+    );
+}
+
+#[test]
 fn copy_search_owns_prompt_repeat_highlights_selection_and_restore() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
