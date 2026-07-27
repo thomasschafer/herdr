@@ -180,7 +180,10 @@ impl AppState {
             'G' => self.copy_mode_history_bottom(terminal_runtimes),
             '0' => self.copy_mode_line_edge(terminal_runtimes, false),
             '$' => self.copy_mode_line_edge(terminal_runtimes, true),
-            '^' => self.copy_mode_first_non_blank(terminal_runtimes),
+            '^' | '_' => self.copy_mode_first_non_blank(terminal_runtimes),
+            'H' => self.copy_mode_viewport_jump(terminal_runtimes, ViewportJump::Top),
+            'M' => self.copy_mode_viewport_jump(terminal_runtimes, ViewportJump::Middle),
+            'L' => self.copy_mode_viewport_jump(terminal_runtimes, ViewportJump::Bottom),
             '/' => self.open_copy_mode_search(CopyModeSearchDirection::Forward),
             '?' => self.open_copy_mode_search(CopyModeSearchDirection::Backward),
             'n' => self.repeat_copy_mode_search(terminal_runtimes, false),
@@ -627,6 +630,31 @@ impl AppState {
         self.sync_copy_mode_selection(terminal_runtimes);
     }
 
+    fn copy_mode_viewport_jump(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        position: ViewportJump,
+    ) {
+        let Some(copy_mode) = self.copy_mode.as_ref() else {
+            return;
+        };
+        let pane_id = copy_mode.pane_id;
+        let Some(info) = self.pane_info_by_id(pane_id) else {
+            self.exit_copy_mode(terminal_runtimes, false);
+            return;
+        };
+        let bottom = info.inner_rect.height.saturating_sub(1);
+        let cursor_row = match position {
+            ViewportJump::Top => 0,
+            ViewportJump::Middle => bottom / 2,
+            ViewportJump::Bottom => bottom,
+        };
+        if let Some(copy_mode) = self.copy_mode.as_mut() {
+            copy_mode.cursor_row = cursor_row;
+        }
+        self.sync_copy_mode_selection(terminal_runtimes);
+    }
+
     fn copy_mode_word_motion(
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
@@ -924,6 +952,13 @@ enum WordMotion {
     NextBigStart,
     PreviousBigStart,
     NextBigEnd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewportJump {
+    Top,
+    Middle,
+    Bottom,
 }
 
 fn first_non_blank_col(text: &str) -> Option<u16> {
@@ -1783,6 +1818,34 @@ mod tests {
         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
 
         assert_eq!(copy_mode_clipboard_text(&mut app), "foo.bar b");
+    }
+
+    #[tokio::test]
+    async fn copy_mode_viewport_jumps_move_cursor_within_pane() {
+        let (mut app, _pane_id) = app_with_copy_screen(b"alpha\r\nbeta\r\n");
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        let bottom = app.state.view.pane_infos[0]
+            .inner_rect
+            .height
+            .saturating_sub(1);
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::SHIFT));
+        assert_eq!(
+            app.state.copy_mode.as_ref().expect("copy mode").cursor_row,
+            0
+        );
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('l'), KeyModifiers::SHIFT));
+        assert_eq!(
+            app.state.copy_mode.as_ref().expect("copy mode").cursor_row,
+            bottom
+        );
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('m'), KeyModifiers::SHIFT));
+        assert_eq!(
+            app.state.copy_mode.as_ref().expect("copy mode").cursor_row,
+            bottom / 2
+        );
     }
 
     #[tokio::test]
