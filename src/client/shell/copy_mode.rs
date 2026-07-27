@@ -223,9 +223,12 @@ impl ClientShellState {
                 outcome.repaint = true;
             }
             '$' => self.request_copy_motion(crate::api::schema::PaneCopyMotion::LineEnd, outcome),
-            '^' => {
+            '^' | '_' => {
                 self.request_copy_motion(crate::api::schema::PaneCopyMotion::FirstNonBlank, outcome)
             }
+            'H' => self.move_copy_to_viewport_row(CopyViewportRow::Top, outcome),
+            'M' => self.move_copy_to_viewport_row(CopyViewportRow::Middle, outcome),
+            'L' => self.move_copy_to_viewport_row(CopyViewportRow::Bottom, outcome),
             '/' => self.open_copy_search(crate::api::schema::PaneCopySearchDirection::Forward),
             '?' => self.open_copy_search(crate::api::schema::PaneCopySearchDirection::Backward),
             'n' => self.repeat_copy_search(false, outcome),
@@ -603,6 +606,32 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    fn move_copy_to_viewport_row(
+        &mut self,
+        position: CopyViewportRow,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(hit) = self.copy_hit() else {
+            return;
+        };
+        let Some(copy_mode) = self.copy_mode.as_mut() else {
+            return;
+        };
+        let viewport_top = copy_mode
+            .max_offset_from_bottom
+            .saturating_sub(copy_mode.offset_from_bottom)
+            .min(u32::MAX as usize) as u32;
+        let bottom = hit.inner_rect.height.saturating_sub(1);
+        let viewport_row = match position {
+            CopyViewportRow::Top => 0,
+            CopyViewportRow::Middle => bottom / 2,
+            CopyViewportRow::Bottom => bottom,
+        };
+        copy_mode.cursor.row = viewport_top.saturating_add(u32::from(viewport_row));
+        self.sync_copy_selection();
+        outcome.repaint = true;
+    }
+
     fn set_copy_cursor_col(&mut self, col: u16) {
         if let Some(copy_mode) = self.copy_mode.as_mut() {
             copy_mode.cursor.col = col;
@@ -859,4 +888,11 @@ impl ClientShellState {
         self.mode = ClientShellMode::Terminal;
         outcome.repaint = true;
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CopyViewportRow {
+    Top,
+    Middle,
+    Bottom,
 }
