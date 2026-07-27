@@ -307,8 +307,9 @@ impl TerminalRuntime {
         row: u32,
         col: u16,
         motion: crate::pane::TerminalWordMotion,
+        big_word: bool,
     ) -> Option<crate::pane::TerminalTextPoint> {
-        self.0.word_motion_target(row, col, motion)
+        self.0.word_motion_target(row, col, motion, big_word)
     }
 
     pub fn input_state(&self) -> Option<crate::pane::InputState> {

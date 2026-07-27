@@ -302,6 +302,7 @@ impl PaneTerminal {
         row: u32,
         col: u16,
         motion: TerminalWordMotion,
+        big_word: bool,
     ) -> Option<TerminalTextPoint> {
         let core = self.ghostty.core.lock().ok()?;
         let cols = core.terminal.cols().ok()?;
@@ -332,7 +333,7 @@ impl PaneTerminal {
                 .last()
                 .is_some_and(|row| row.soft_wrapped && end_row < total_rows);
             let buffer = RetainedTextBuffer::new_words(cols, rows, u32::try_from(start_row).ok()?);
-            let target = buffer.word_motion(u32::try_from(row).ok()?, col, motion);
+            let target = buffer.word_motion(u32::try_from(row).ok()?, col, motion, big_word);
             let needs_more_history = motion == TerminalWordMotion::PreviousStart
                 && target
                     .is_some_and(|target| starts_in_continuation && target.row == start_row as u32);
@@ -773,75 +774,76 @@ impl RetainedTextBuffer {
         row: u32,
         col: u16,
         motion: TerminalWordMotion,
+        big_word: bool,
     ) -> Option<TerminalTextPoint> {
         let current = self.atoms.iter().position(|atom| {
             atom.point
                 .is_some_and(|point| point.row == row && col >= point.col && col <= atom.end_col)
         })?;
         match motion {
-            TerminalWordMotion::NextStart => self.next_word_start(current),
-            TerminalWordMotion::PreviousStart => self.previous_word_start(current),
-            TerminalWordMotion::NextEnd => self.next_word_end(current),
+            TerminalWordMotion::NextStart => self.next_word_start(current, big_word),
+            TerminalWordMotion::PreviousStart => self.previous_word_start(current, big_word),
+            TerminalWordMotion::NextEnd => self.next_word_end(current, big_word),
         }
     }
 
-    fn next_word_start(&self, current: usize) -> Option<TerminalTextPoint> {
-        let current_class = self.atoms.get(current)?.class;
+    fn atom_class(&self, index: usize, big_word: bool) -> Option<TextClass> {
+        self.atoms
+            .get(index)
+            .map(|atom| effective_class(atom.class, big_word))
+    }
+
+    fn next_word_start(&self, current: usize, big_word: bool) -> Option<TerminalTextPoint> {
+        let current_class = self.atom_class(current, big_word)?;
         let mut next = current.saturating_add(1);
         if current_class != TextClass::Whitespace {
             while self
-                .atoms
-                .get(next)
-                .is_some_and(|atom| atom.class == current_class)
+                .atom_class(next, big_word)
+                .is_some_and(|class| class == current_class)
             {
                 next += 1;
             }
         }
         while self
-            .atoms
-            .get(next)
-            .is_some_and(|atom| atom.class == TextClass::Whitespace)
+            .atom_class(next, big_word)
+            .is_some_and(|class| class == TextClass::Whitespace)
         {
             next += 1;
         }
         self.next_point(next)
     }
 
-    fn previous_word_start(&self, current: usize) -> Option<TerminalTextPoint> {
+    fn previous_word_start(&self, current: usize, big_word: bool) -> Option<TerminalTextPoint> {
         let mut previous = current.checked_sub(1)?;
         while self
-            .atoms
-            .get(previous)
-            .is_some_and(|atom| atom.class == TextClass::Whitespace)
+            .atom_class(previous, big_word)
+            .is_some_and(|class| class == TextClass::Whitespace)
         {
             previous = previous.checked_sub(1)?;
         }
-        let class = self.atoms.get(previous)?.class;
+        let class = self.atom_class(previous, big_word)?;
         while previous > 0
             && self
-                .atoms
-                .get(previous - 1)
-                .is_some_and(|atom| atom.class == class)
+                .atom_class(previous - 1, big_word)
+                .is_some_and(|prev_class| prev_class == class)
         {
             previous -= 1;
         }
         self.previous_point(previous)
     }
 
-    fn next_word_end(&self, current: usize) -> Option<TerminalTextPoint> {
+    fn next_word_end(&self, current: usize, big_word: bool) -> Option<TerminalTextPoint> {
         let mut next = current.saturating_add(1);
         while self
-            .atoms
-            .get(next)
-            .is_some_and(|atom| atom.class == TextClass::Whitespace)
+            .atom_class(next, big_word)
+            .is_some_and(|class| class == TextClass::Whitespace)
         {
             next += 1;
         }
-        let class = self.atoms.get(next)?.class;
+        let class = self.atom_class(next, big_word)?;
         while self
-            .atoms
-            .get(next + 1)
-            .is_some_and(|atom| atom.class == class)
+            .atom_class(next + 1, big_word)
+            .is_some_and(|next_class| next_class == class)
         {
             next += 1;
         }
@@ -889,6 +891,17 @@ fn terminal_cell_text(graphemes: &[u32]) -> String {
         .iter()
         .map(|codepoint| char::from_u32(*codepoint).unwrap_or(char::REPLACEMENT_CHARACTER))
         .collect()
+}
+
+/// Collapse `Separator` into `Word` for WORD motions (`W`/`E`/`B`), which treat
+/// every non-whitespace run as a single word. Small-word motions (`w`/`e`/`b`)
+/// keep the distinction so punctuation runs form their own words.
+fn effective_class(class: TextClass, big_word: bool) -> TextClass {
+    if big_word && class == TextClass::Separator {
+        TextClass::Word
+    } else {
+        class
+    }
 }
 
 fn text_class(text: &str) -> TextClass {
@@ -3215,11 +3228,11 @@ mod tests {
             RetainedTextBuffer::new(5, vec![text_row(first, true), text_row(second, false)]);
 
         assert_eq!(
-            buffer.word_motion(0, 0, TerminalWordMotion::NextStart),
+            buffer.word_motion(0, 0, TerminalWordMotion::NextStart, false),
             None
         );
         assert_eq!(
-            buffer.word_motion(0, 0, TerminalWordMotion::NextEnd),
+            buffer.word_motion(0, 0, TerminalWordMotion::NextEnd, false),
             Some(TerminalTextPoint { row: 1, col: 4 })
         );
     }
@@ -3251,20 +3264,52 @@ mod tests {
         );
 
         assert_eq!(
-            buffer.word_motion(0, 0, TerminalWordMotion::NextStart),
+            buffer.word_motion(0, 0, TerminalWordMotion::NextStart, false),
             Some(TerminalTextPoint { row: 0, col: 3 })
         );
         assert_eq!(
-            buffer.word_motion(0, 3, TerminalWordMotion::NextStart),
+            buffer.word_motion(0, 3, TerminalWordMotion::NextStart, false),
             Some(TerminalTextPoint { row: 0, col: 4 })
         );
         assert_eq!(
-            buffer.word_motion(0, 4, TerminalWordMotion::NextStart),
+            buffer.word_motion(0, 4, TerminalWordMotion::NextStart, false),
             Some(TerminalTextPoint { row: 1, col: 0 })
         );
         assert_eq!(
-            buffer.word_motion(1, 1, TerminalWordMotion::PreviousStart),
+            buffer.word_motion(1, 1, TerminalWordMotion::PreviousStart, false),
             Some(TerminalTextPoint { row: 1, col: 0 })
+        );
+    }
+
+    #[test]
+    fn retained_text_big_word_motions_collapse_separators() {
+        let buffer = RetainedTextBuffer::new(
+            12,
+            vec![text_row(
+                "foo.bar baz  ".chars().map(|ch| text_cell(&ch.to_string())),
+                false,
+            )],
+        );
+
+        // Small-word `w` stops on the `.` separator run inside `foo.bar`.
+        assert_eq!(
+            buffer.word_motion(0, 0, TerminalWordMotion::NextStart, false),
+            Some(TerminalTextPoint { row: 0, col: 3 })
+        );
+        // WORD `W` treats `foo.bar` as one word and lands on `baz`.
+        assert_eq!(
+            buffer.word_motion(0, 0, TerminalWordMotion::NextStart, true),
+            Some(TerminalTextPoint { row: 0, col: 8 })
+        );
+        // WORD `E` from the start jumps to the end of `foo.bar`.
+        assert_eq!(
+            buffer.word_motion(0, 0, TerminalWordMotion::NextEnd, true),
+            Some(TerminalTextPoint { row: 0, col: 6 })
+        );
+        // WORD `B` from `baz` returns to the start of `foo.bar`.
+        assert_eq!(
+            buffer.word_motion(0, 8, TerminalWordMotion::PreviousStart, true),
+            Some(TerminalTextPoint { row: 0, col: 0 })
         );
     }
 
@@ -3330,7 +3375,7 @@ mod tests {
         let pane = PaneTerminal::new(GhosttyPaneTerminal::new(terminal, tx).unwrap());
 
         assert_eq!(
-            pane.word_motion_target(last_row, 0, TerminalWordMotion::PreviousStart),
+            pane.word_motion_target(last_row, 0, TerminalWordMotion::PreviousStart, false),
             Some(TerminalTextPoint { row: 0, col: 0 })
         );
     }
@@ -3349,6 +3394,7 @@ mod tests {
                 text_match.start.row,
                 text_match.start.col,
                 TerminalWordMotion::NextEnd,
+                false,
             ),
             Some(text_match.end)
         );
@@ -3370,6 +3416,7 @@ mod tests {
                 text_match.start.row,
                 text_match.start.col,
                 TerminalWordMotion::NextEnd,
+                false,
             ),
             Some(TerminalTextPoint {
                 row: text_match.end.row,
