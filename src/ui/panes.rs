@@ -323,6 +323,7 @@ pub(super) fn render_panes(
                 && !pane_is_scrolled_back(rt)
                 && app.pane_exposes_host_cursor(ws_idx, info.id);
             rt.render(frame, info.inner_rect, show_cursor);
+            render_inactive_pane_tint(app, frame, info);
             render_pane_scrollbar(app, frame, info, rt);
 
             let should_dim = !info.is_focused && multi_pane && !terminal_active;
@@ -371,6 +372,38 @@ pub(super) fn render_panes(
     }
 
     render_pane_borders(app, ws, pane_infos, split_borders, frame);
+}
+
+/// Replace the default background of an unfocused pane with the configured
+/// inactive shade, mirroring tmux `window-style`: only cells still on the
+/// terminal's default background are tinted, explicitly colored cells keep
+/// their background.
+fn render_inactive_pane_tint(app: &AppState, frame: &mut Frame, info: &PaneInfo) {
+    let Some(tint) = app.inactive_pane_bg else {
+        return;
+    };
+    if info.is_focused {
+        return;
+    }
+    let host_bg = app
+        .host_terminal_theme
+        .background
+        .map(|color| Color::Rgb(color.r, color.g, color.b));
+    // Cover the whole content area including the scrollbar gutter, not just
+    // `inner_rect`, so the tint reaches every cell inside the borders.
+    let area = pane_inner_rect(info.rect, info.borders);
+    let buf = frame.buffer_mut();
+    let right = area.x.saturating_add(area.width);
+    let bottom = area.y.saturating_add(area.height);
+    for y in area.y..bottom {
+        for x in area.x..right {
+            let cell = &mut buf[(x, y)];
+            let bg = cell.style().bg;
+            if bg == Some(Color::Reset) || bg == host_bg {
+                cell.set_style(Style::default().bg(tint));
+            }
+        }
+    }
 }
 
 pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
@@ -1246,6 +1279,109 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(1, 1)].style().fg, Some(app.palette.accent));
         assert_eq!(buffer[(2, 1)].style().fg, Some(app.palette.overlay0));
+    }
+
+    #[test]
+    fn inactive_pane_tint_replaces_default_background_only() {
+        let mut app = AppState::test_new();
+        app.inactive_pane_bg = Some(Color::Rgb(42, 42, 55));
+        app.host_terminal_theme = crate::terminal_theme::TerminalTheme {
+            background: Some(crate::terminal_theme::RgbColor {
+                r: 12,
+                g: 14,
+                b: 16,
+            }),
+            ..Default::default()
+        };
+        let unfocused = PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(0, 0, 6, 2),
+            inner_rect: Rect::new(0, 0, 6, 2),
+            scrollbar_rect: None,
+            borders: Borders::NONE,
+            is_focused: false,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(6, 2)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let buf = frame.buffer_mut();
+                buf[(1, 0)].set_style(Style::default().bg(Color::Rgb(12, 14, 16)));
+                buf[(2, 0)].set_style(Style::default().bg(Color::Rgb(200, 10, 10)));
+                render_inactive_pane_tint(&app, frame, &unfocused);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        // Untouched default (Reset) background and the host default background
+        // both take the tint; explicit backgrounds keep their color.
+        assert_eq!(buffer[(0, 0)].style().bg, Some(Color::Rgb(42, 42, 55)));
+        assert_eq!(buffer[(1, 0)].style().bg, Some(Color::Rgb(42, 42, 55)));
+        assert_eq!(buffer[(2, 0)].style().bg, Some(Color::Rgb(200, 10, 10)));
+        assert_eq!(buffer[(0, 1)].style().bg, Some(Color::Rgb(42, 42, 55)));
+    }
+
+    #[test]
+    fn inactive_pane_tint_skips_focused_pane_and_unset_config() {
+        let mut app = AppState::test_new();
+        let pane = |focused| PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(0, 0, 4, 2),
+            inner_rect: Rect::new(0, 0, 4, 2),
+            scrollbar_rect: None,
+            borders: Borders::NONE,
+            is_focused: focused,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(4, 2)).unwrap();
+
+        // Unset config: unfocused pane stays untouched.
+        terminal
+            .draw(|frame| render_inactive_pane_tint(&app, frame, &pane(false)))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Reset)
+        );
+
+        // Configured tint: focused pane stays untouched.
+        app.inactive_pane_bg = Some(Color::Rgb(42, 42, 55));
+        terminal
+            .draw(|frame| render_inactive_pane_tint(&app, frame, &pane(true)))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Reset)
+        );
+    }
+
+    #[test]
+    fn inactive_pane_tint_covers_scrollbar_gutter_inside_borders() {
+        let mut app = AppState::test_new();
+        app.inactive_pane_bg = Some(Color::Rgb(42, 42, 55));
+        let info = PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(0, 0, 8, 4),
+            // inner_rect excludes the right-hand scrollbar gutter column.
+            inner_rect: Rect::new(1, 1, 5, 2),
+            scrollbar_rect: None,
+            borders: Borders::ALL,
+            is_focused: false,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(8, 4)).unwrap();
+
+        terminal
+            .draw(|frame| render_inactive_pane_tint(&app, frame, &info))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        // Gutter column (inside the border, outside inner_rect) is tinted.
+        assert_eq!(buffer[(6, 1)].style().bg, Some(Color::Rgb(42, 42, 55)));
+        // Border cells are not touched.
+        assert_eq!(buffer[(0, 0)].style().bg, Some(Color::Reset));
+        assert_eq!(buffer[(7, 1)].style().bg, Some(Color::Reset));
     }
 
     #[tokio::test]

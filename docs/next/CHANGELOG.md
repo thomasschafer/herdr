@@ -93,6 +93,7 @@
 - Windows now shows `system` notifications and completes MP3 notification sounds without leaving PowerShell players waiting for a timeout. (#1330)
 
 ### Added
+- Added `ui.inactive_pane_bg` to give unfocused split panes a different background shade, like tmux `window-style`. Cells with an explicitly colored background keep their color.
 - Copy mode now supports vim-style `W`/`E`/`B` whitespace-delimited WORD motions, `H`/`M`/`L` jumps to the top, middle, or bottom of the visible pane, and `_` as an alias for `^` (first non-blank).
 - Added `workspace.dynamic_naming` to stop workspace names and git status from following the live directory of a workspace's root pane as it `cd`s around. When disabled, use the new `keys.refresh_workspace_identity` keybinding or `herdr workspace refresh-identity <workspace_id>` to explicitly re-pin a workspace's name and git status to its current directory.
 

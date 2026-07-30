@@ -869,6 +869,10 @@ pub struct UiConfig {
     pub pane_gaps: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Background color for unfocused split panes, like tmux `window-style`.
+    /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
+    /// Unset keeps the terminal's own background. Default: unset.
+    pub inactive_pane_bg: Option<String>,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1088,6 +1092,7 @@ impl Default for UiConfig {
             pane_scrollbars: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
+            inactive_pane_bg: None,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
