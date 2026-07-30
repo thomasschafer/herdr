@@ -278,5 +278,48 @@ fn blit_pane_surface(target: &mut FrameData, source: &FrameData, area: Rect) {
     target.graphics.clear();
 }
 
+fn apply_inactive_pane_tint(
+    target: &mut FrameData,
+    surface: &PaneSurfaceFrame,
+    area: Rect,
+    tint: Option<ratatui::style::Color>,
+    host_background: Option<crate::terminal_theme::RgbColor>,
+) {
+    let Some(tint) = tint else {
+        return;
+    };
+    let tint = crate::protocol::color_to_u32(tint);
+    let reset = crate::protocol::color_to_u32(ratatui::style::Color::Reset);
+    let host_background = host_background.map(|color| {
+        crate::protocol::color_to_u32(ratatui::style::Color::Rgb(color.r, color.g, color.b))
+    });
+
+    for pane in surface.panes.iter().filter(|pane| !pane.focused) {
+        let mut right = pane.inner_rect.x.saturating_add(pane.inner_rect.width);
+        let mut bottom = pane.inner_rect.y.saturating_add(pane.inner_rect.height);
+        if let Some(scrollbar) = pane.scrollbar_rect {
+            right = right.max(scrollbar.x.saturating_add(scrollbar.width));
+            bottom = bottom.max(scrollbar.y.saturating_add(scrollbar.height));
+        }
+        let right = right.min(surface.frame.width).min(area.width);
+        let bottom = bottom.min(surface.frame.height).min(area.height);
+        for row in pane.inner_rect.y.min(bottom)..bottom {
+            for col in pane.inner_rect.x.min(right)..right {
+                let target_x = area.x.saturating_add(col);
+                let target_y = area.y.saturating_add(row);
+                let index = usize::from(target_y)
+                    .saturating_mul(usize::from(target.width))
+                    .saturating_add(usize::from(target_x));
+                let Some(cell) = target.cells.get_mut(index) else {
+                    continue;
+                };
+                if cell.bg == reset || host_background == Some(cell.bg) {
+                    cell.bg = tint;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

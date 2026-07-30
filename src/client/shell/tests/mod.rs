@@ -5,6 +5,7 @@ use crate::protocol::{
     PaneSurfaceSplit, PaneSurfaceSplitDirection, SurfaceRect,
 };
 use crossterm::event::MouseEvent;
+use ratatui::style::Color;
 mod text_editing;
 
 pub(super) fn snapshot() -> ClientShellSnapshot {
@@ -132,6 +133,28 @@ fn surface() -> PaneSurfaceFrame {
         popup: None,
         graphics: crate::protocol::SurfaceGraphicsScene::default(),
     }
+}
+
+#[test]
+fn inactive_pane_tint_replaces_only_default_backgrounds() {
+    let mut surface = surface();
+    surface.panes[0].focused = false;
+    surface.frame.cells[1].bg = crate::protocol::color_to_u32(Color::Red);
+    let mut frame = surface.frame.clone();
+
+    apply_inactive_pane_tint(
+        &mut frame,
+        &surface,
+        Rect::new(0, 0, surface.frame.width, surface.frame.height),
+        Some(Color::Rgb(42, 42, 55)),
+        None,
+    );
+
+    assert_eq!(
+        frame.cells[0].bg,
+        crate::protocol::color_to_u32(Color::Rgb(42, 42, 55))
+    );
+    assert_eq!(frame.cells[1].bg, crate::protocol::color_to_u32(Color::Red));
 }
 
 fn frame_rows(frame: &FrameData) -> Vec<String> {
