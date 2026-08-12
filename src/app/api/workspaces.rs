@@ -529,6 +529,37 @@ mod tests {
         assert_eq!(app.state.workspaces[0].identity_cwd, live_cwd);
     }
 
+    #[test]
+    fn api_workspace_list_reports_branch_and_last_focused_stamp() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("stamped"), Workspace::test_new("bare")];
+        app.state.workspaces[0].cached_git_branch = Some("branch-fixture".into());
+        app.state.workspaces[0].last_focused_unix_ms = Some(1_784_840_000_000);
+        // test_new derives a real branch from the enclosing repo; clear it so
+        // the absent-field expectation is deterministic.
+        app.state.workspaces[1].cached_git_branch = None;
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+
+        let response = app.handle_workspace_list("req".into());
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceList { workspaces } = success.result else {
+            panic!("expected workspace_list result");
+        };
+        assert_eq!(workspaces[0].branch.as_deref(), Some("branch-fixture"));
+        assert_eq!(workspaces[0].last_focused_unix_ms, Some(1_784_840_000_000));
+        assert!(workspaces[1].branch.is_none());
+        assert!(workspaces[1].last_focused_unix_ms.is_none());
+    }
+
     fn app_with_linked_worktree() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
