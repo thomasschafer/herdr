@@ -1199,6 +1199,14 @@ impl AppState {
             .is_some_and(|tab_idx| tab_idx == self.workspaces[ws_idx].active_tab)
     }
 
+    /// Record the moment the workspace at `idx` gains focus so the API can
+    /// expose most-recently-used ordering.
+    fn stamp_workspace_focus(&mut self, idx: usize) {
+        if let Some(ws) = self.workspaces.get_mut(idx) {
+            ws.last_focused_unix_ms = Some(crate::workspace::current_unix_ms());
+        }
+    }
+
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
             let previous_focus = self.current_pane_focus_target();
@@ -1210,6 +1218,7 @@ impl AppState {
             self.active = Some(idx);
             if workspace_changed {
                 self.previous_workspace = previous_ws_id;
+                self.stamp_workspace_focus(idx);
             }
             self.selected = idx;
             let workspace_id = self.workspaces[idx].id.clone();
@@ -1251,6 +1260,7 @@ impl AppState {
         self.active = Some(ws_idx);
         if workspace_changed {
             self.previous_workspace = previous_ws_id;
+            self.stamp_workspace_focus(ws_idx);
         }
         self.selected = ws_idx;
         let workspace_id = self.workspaces[ws_idx].id.clone();
@@ -1819,7 +1829,7 @@ impl AppState {
             self.tab_scroll_follow_active = true;
         } else {
             // Keep focus on the previously focused workspace
-            if let Some(id) = active_workspace_id {
+            if let Some(id) = active_workspace_id.as_deref() {
                 if let Some(idx) = self.workspaces.iter().position(|ws| ws.id == id) {
                     self.selected = idx;
                 }
@@ -1828,6 +1838,13 @@ impl AppState {
                 self.selected = self.workspaces.len() - 1;
             }
             self.active = Some(self.selected);
+            let focus_fell_back = self
+                .workspaces
+                .get(self.selected)
+                .is_some_and(|ws| Some(ws.id.as_str()) != active_workspace_id.as_deref());
+            if focus_fell_back {
+                self.stamp_workspace_focus(self.selected);
+            }
             self.workspace_scroll = self
                 .workspace_scroll
                 .min(self.workspaces.len().saturating_sub(1));
@@ -3529,7 +3546,7 @@ impl AppState {
                 }
             } else {
                 // Keep focus on the previously focused workspace
-                if let Some(id) = active_workspace_id {
+                if let Some(id) = active_workspace_id.as_deref() {
                     if let Some(idx) = self.workspaces.iter().position(|ws| ws.id == id) {
                         self.active = Some(idx);
                     }
@@ -3537,6 +3554,15 @@ impl AppState {
                 if let Some(active) = self.active {
                     if active >= self.workspaces.len() {
                         self.active = Some(self.workspaces.len() - 1);
+                    }
+                }
+                let focus_fell_back = self
+                    .active
+                    .and_then(|idx| self.workspaces.get(idx))
+                    .is_some_and(|ws| Some(ws.id.as_str()) != active_workspace_id.as_deref());
+                if focus_fell_back {
+                    if let Some(active) = self.active {
+                        self.stamp_workspace_focus(active);
                     }
                 }
                 if let Some(id) = selected_workspace_id {
@@ -4633,6 +4659,60 @@ mod tests {
         state.last_workspace();
 
         assert!(state.previous_workspace.is_none());
+    }
+
+    #[test]
+    fn switching_workspaces_stamps_focus_recency() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        assert!(state.workspaces[0].last_focused_unix_ms.is_none());
+        assert!(state.workspaces[1].last_focused_unix_ms.is_none());
+
+        state.switch_workspace(1);
+
+        assert!(state.workspaces[0].last_focused_unix_ms.is_none());
+        assert!(state.workspaces[1].last_focused_unix_ms.is_some());
+    }
+
+    #[test]
+    fn refocusing_the_active_workspace_keeps_its_focus_stamp() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        state.switch_workspace(1);
+        state.workspaces[1].last_focused_unix_ms = Some(42);
+
+        state.switch_workspace(1);
+
+        assert_eq!(state.workspaces[1].last_focused_unix_ms, Some(42));
+    }
+
+    #[test]
+    fn switching_workspace_tab_across_workspaces_stamps_focus_recency() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+
+        assert!(state.switch_workspace_tab(1, 0));
+
+        assert!(state.workspaces[1].last_focused_unix_ms.is_some());
+    }
+
+    #[test]
+    fn closing_the_active_workspace_stamps_the_fallback_workspace() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+
+        state.close_selected_workspace();
+
+        assert_eq!(state.workspaces.len(), 1);
+        assert_eq!(state.active, Some(0));
+        assert!(state.workspaces[0].last_focused_unix_ms.is_some());
+    }
+
+    #[test]
+    fn closing_a_background_workspace_does_not_stamp_the_active_one() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        state.selected = 1;
+
+        state.close_selected_workspace();
+
+        assert_eq!(state.workspaces.len(), 1);
+        assert!(state.workspaces[0].last_focused_unix_ms.is_none());
     }
 
     #[test]

@@ -500,7 +500,9 @@ impl App {
                 &self.state.terminals,
                 &self.terminal_runtimes,
             ),
+            branch: ws.branch(),
             focused: self.state.active == Some(index),
+            last_focused_unix_ms: ws.last_focused_unix_ms,
             pane_count: ws.public_pane_numbers.len(),
             tab_count: ws.tabs.len(),
             active_tab_id: self.public_tab_id(index, ws.active_tab).unwrap_or_else(|| {

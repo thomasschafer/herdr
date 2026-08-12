@@ -55,6 +55,8 @@ pub struct WorkspaceSnapshot {
     pub identity_cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_focused_unix_ms: Option<u64>,
     #[serde(default)]
     pub public_pane_numbers: HashMap<u32, usize>,
     #[serde(default)]
@@ -158,6 +160,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
             custom_name: snap.custom_name,
             identity_cwd,
             worktree_space: None,
+            last_focused_unix_ms: None,
             public_pane_numbers: HashMap::new(),
             next_public_pane_number: 0,
             public_tab_numbers: Vec::new(),
@@ -301,6 +304,7 @@ fn capture_workspace(
             ws.identity_cwd.clone()
         },
         worktree_space: ws.worktree_space.clone(),
+        last_focused_unix_ms: ws.last_focused_unix_ms,
         public_pane_numbers: ws
             .public_pane_numbers
             .iter()
@@ -562,6 +566,32 @@ mod tests {
         capture_history(&state.workspaces, terminal_runtimes)
     }
 
+    #[test]
+    fn capture_preserves_last_focused_and_serde_round_trips_it() {
+        let mut state = state_with_workspaces(&["stamped", "unstamped"]);
+        state.workspaces[0].last_focused_unix_ms = Some(1_784_840_000_000);
+
+        let snapshot = capture_from_state(&state);
+        assert_eq!(
+            snapshot.workspaces[0].last_focused_unix_ms,
+            Some(1_784_840_000_000)
+        );
+        assert!(snapshot.workspaces[1].last_focused_unix_ms.is_none());
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let stamped_json = serde_json::to_string(&snapshot.workspaces[0]).unwrap();
+        let unstamped_json = serde_json::to_string(&snapshot.workspaces[1]).unwrap();
+        assert!(stamped_json.contains("\"last_focused_unix_ms\":1784840000000"));
+        assert!(!unstamped_json.contains("last_focused_unix_ms"));
+
+        let restored: SessionSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.workspaces[0].last_focused_unix_ms,
+            Some(1_784_840_000_000)
+        );
+        assert!(restored.workspaces[1].last_focused_unix_ms.is_none());
+    }
+
     fn root_split_ratio(tab: &TabSnapshot) -> Option<f32> {
         match &tab.layout {
             LayoutSnapshot::Split { ratio, .. } => Some(*ratio),
@@ -679,6 +709,7 @@ mod tests {
                 custom_name: Some("pi-mono".to_string()),
                 identity_cwd: PathBuf::from("/home/can/Projects/herdr"),
                 worktree_space: None,
+                last_focused_unix_ms: None,
                 public_pane_numbers: HashMap::from([(0, 1), (1, 2)]),
                 next_public_pane_number: 3,
                 public_tab_numbers: vec![1],
@@ -1262,6 +1293,7 @@ mod tests {
                 custom_name: Some("fallback test".to_string()),
                 identity_cwd: PathBuf::from("/tmp"),
                 worktree_space: None,
+                last_focused_unix_ms: None,
                 public_pane_numbers: HashMap::new(),
                 next_public_pane_number: 0,
                 public_tab_numbers: Vec::new(),

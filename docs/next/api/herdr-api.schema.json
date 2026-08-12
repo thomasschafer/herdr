@@ -1076,11 +1076,27 @@
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
             },
+            "branch": {
+              "description": "Current git branch of the workspace's repository, when its cwd is\ninside one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "focused": {
               "type": "boolean"
             },
             "label": {
               "type": "string"
+            },
+            "last_focused_unix_ms": {
+              "description": "Milliseconds since the Unix epoch when this workspace last gained\nfocus. Absent until the workspace first gains focus after creation, or\nwhen restored from a snapshot that predates focus tracking.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "number": {
               "format": "uint",
@@ -9948,11 +9964,27 @@
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
             },
+            "branch": {
+              "description": "Current git branch of the workspace's repository, when its cwd is\ninside one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "focused": {
               "type": "boolean"
             },
             "label": {
               "type": "string"
+            },
+            "last_focused_unix_ms": {
+              "description": "Milliseconds since the Unix epoch when this workspace last gained\nfocus. Absent until the workspace first gains focus after creation, or\nwhen restored from a snapshot that predates focus tracking.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "number": {
               "format": "uint",

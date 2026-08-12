@@ -706,7 +706,9 @@ fn worktree_request_and_response_round_trip() {
                 workspace_id: "w_1".into(),
                 number: 2,
                 label: "herdr".into(),
+                branch: None,
                 focused: true,
+                last_focused_unix_ms: None,
                 pane_count: 1,
                 tab_count: 1,
                 active_tab_id: "w_1:1".into(),
@@ -792,7 +794,9 @@ fn worktree_lifecycle_events_round_trip() {
         workspace_id: "w_2".into(),
         number: 2,
         label: "herdr".into(),
+        branch: None,
         focused: true,
+        last_focused_unix_ms: None,
         pane_count: 1,
         tab_count: 1,
         active_tab_id: "w_2:1".into(),
@@ -1317,4 +1321,31 @@ fn popup_close_request_round_trips() {
 
     assert_eq!(json["method"], "popup.close");
     assert_eq!(json["params"], serde_json::json!({}));
+}
+
+#[test]
+fn workspace_info_branch_and_recency_fields_are_optional_on_the_wire() {
+    // Payloads from servers that predate the fields must still decode.
+    let legacy = r#"{
+        "workspace_id":"w_1","number":1,"label":"herdr","focused":true,
+        "pane_count":1,"tab_count":1,"active_tab_id":"w_1:1",
+        "agent_status":"unknown"
+    }"#;
+    let decoded: WorkspaceInfo = serde_json::from_str(legacy).unwrap();
+    assert!(decoded.branch.is_none());
+    assert!(decoded.last_focused_unix_ms.is_none());
+
+    // Absent values are omitted from the wire, present values round-trip.
+    let unstamped_json = serde_json::to_string(&decoded).unwrap();
+    assert!(!unstamped_json.contains("branch"));
+    assert!(!unstamped_json.contains("last_focused_unix_ms"));
+
+    let mut stamped = decoded;
+    stamped.branch = Some("feat/workspace-recency".into());
+    stamped.last_focused_unix_ms = Some(1_784_840_000_000);
+    let stamped_json = serde_json::to_string(&stamped).unwrap();
+    assert!(stamped_json.contains("\"branch\":\"feat/workspace-recency\""));
+    assert!(stamped_json.contains("\"last_focused_unix_ms\":1784840000000"));
+    let restored: WorkspaceInfo = serde_json::from_str(&stamped_json).unwrap();
+    assert_eq!(restored, stamped);
 }

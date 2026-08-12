@@ -53,7 +53,16 @@ pub struct WorkspaceInfo {
     pub workspace_id: String,
     pub number: usize,
     pub label: String,
+    /// Current git branch of the workspace's repository, when its cwd is
+    /// inside one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub focused: bool,
+    /// Milliseconds since the Unix epoch when this workspace last gained
+    /// focus. Absent until the workspace first gains focus after creation, or
+    /// when restored from a snapshot that predates focus tracking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_focused_unix_ms: Option<u64>,
     pub pane_count: usize,
     pub tab_count: usize,
     pub active_tab_id: String,
