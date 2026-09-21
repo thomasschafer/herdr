@@ -383,6 +383,11 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(initial.clone()));
 
+    assert!(matches!(
+        state.endpoint_method_for_action(crate::input::KeybindAction::LastPaneInTab),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "pane_2"
+    ));
+
     let mut cycle = ClientShellInput::default();
     state.record_binding(
         crate::input::KeybindMatch::Action(crate::input::KeybindAction::CyclePaneNext),
@@ -402,6 +407,10 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
     replacement.panes[0].focused = false;
     replacement.panes[1].focused = true;
     state.set_snapshot(Box::new(replacement));
+    assert!(matches!(
+        state.endpoint_method_for_action(crate::input::KeybindAction::LastPaneInTab),
+        Some(crate::api::schema::Method::PaneFocus(target)) if target.pane_id == "pane_1"
+    ));
     let mut last = ClientShellInput::default();
     state.record_binding(
         crate::input::KeybindMatch::Action(crate::input::KeybindAction::LastPane),

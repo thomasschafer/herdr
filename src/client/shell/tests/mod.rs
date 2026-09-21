@@ -136,16 +136,17 @@ fn surface() -> PaneSurfaceFrame {
 }
 
 #[test]
-fn inactive_pane_tint_replaces_only_default_backgrounds() {
+fn pane_tint_replaces_only_default_backgrounds() {
     let mut surface = surface();
     surface.panes[0].focused = false;
     surface.frame.cells[1].bg = crate::protocol::color_to_u32(Color::Red);
     let mut frame = surface.frame.clone();
 
-    apply_inactive_pane_tint(
+    apply_pane_tint(
         &mut frame,
         &surface,
         Rect::new(0, 0, surface.frame.width, surface.frame.height),
+        None,
         Some(Color::Rgb(42, 42, 55)),
         None,
     );
@@ -155,6 +156,53 @@ fn inactive_pane_tint_replaces_only_default_backgrounds() {
         crate::protocol::color_to_u32(Color::Rgb(42, 42, 55))
     );
     assert_eq!(frame.cells[1].bg, crate::protocol::color_to_u32(Color::Red));
+}
+
+#[test]
+fn active_pane_tint_requires_a_split() {
+    let surface = surface();
+    let mut lone_frame = surface.frame.clone();
+    apply_pane_tint(
+        &mut lone_frame,
+        &surface,
+        Rect::new(0, 0, surface.frame.width, surface.frame.height),
+        Some(Color::Rgb(40, 43, 64)),
+        None,
+        None,
+    );
+    assert_eq!(
+        lone_frame.cells[0].bg,
+        crate::protocol::color_to_u32(Color::Reset)
+    );
+
+    let mut split_surface = surface.clone();
+    let mut unfocused = split_surface.panes[0].clone();
+    unfocused.focused = false;
+    unfocused.inner_rect = SurfaceRect {
+        x: 2,
+        y: 0,
+        width: 2,
+        height: 2,
+    };
+    split_surface.panes[0].inner_rect.width = 2;
+    split_surface.panes.push(unfocused);
+    let mut split_frame = split_surface.frame.clone();
+    apply_pane_tint(
+        &mut split_frame,
+        &split_surface,
+        Rect::new(0, 0, split_surface.frame.width, split_surface.frame.height),
+        Some(Color::Rgb(40, 43, 64)),
+        None,
+        None,
+    );
+    assert_eq!(
+        split_frame.cells[0].bg,
+        crate::protocol::color_to_u32(Color::Rgb(40, 43, 64))
+    );
+    assert_eq!(
+        split_frame.cells[2].bg,
+        crate::protocol::color_to_u32(Color::Reset)
+    );
 }
 
 fn frame_rows(frame: &FrameData) -> Vec<String> {

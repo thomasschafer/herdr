@@ -121,6 +121,11 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            active_pane_bg: config
+                .ui
+                .active_pane_bg
+                .as_deref()
+                .map(crate::config::parse_color),
             inactive_pane_bg: config
                 .ui
                 .inactive_pane_bg
@@ -328,6 +333,7 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.active_pane_bg = ui.active_pane_bg.as_deref().map(crate::config::parse_color);
                 self.inactive_pane_bg = ui
                     .inactive_pane_bg
                     .as_deref()

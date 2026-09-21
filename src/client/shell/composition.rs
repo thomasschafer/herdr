@@ -329,10 +329,11 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
-        apply_inactive_pane_tint(
+        apply_pane_tint(
             &mut frame,
             surface,
             layout.pane_surface,
+            self.config.active_pane_bg,
             self.config.inactive_pane_bg,
             self.host_background,
         );

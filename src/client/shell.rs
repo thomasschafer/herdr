@@ -278,23 +278,32 @@ fn blit_pane_surface(target: &mut FrameData, source: &FrameData, area: Rect) {
     target.graphics.clear();
 }
 
-fn apply_inactive_pane_tint(
+fn apply_pane_tint(
     target: &mut FrameData,
     surface: &PaneSurfaceFrame,
     area: Rect,
-    tint: Option<ratatui::style::Color>,
+    active_tint: Option<ratatui::style::Color>,
+    inactive_tint: Option<ratatui::style::Color>,
     host_background: Option<crate::terminal_theme::RgbColor>,
 ) {
-    let Some(tint) = tint else {
+    if active_tint.is_none() && inactive_tint.is_none() {
         return;
-    };
-    let tint = crate::protocol::color_to_u32(tint);
+    }
     let reset = crate::protocol::color_to_u32(ratatui::style::Color::Reset);
     let host_background = host_background.map(|color| {
         crate::protocol::color_to_u32(ratatui::style::Color::Rgb(color.r, color.g, color.b))
     });
 
-    for pane in surface.panes.iter().filter(|pane| !pane.focused) {
+    let multi_pane = surface.panes.len() > 1;
+    for pane in &surface.panes {
+        let tint = if pane.focused {
+            multi_pane.then_some(active_tint).flatten()
+        } else {
+            inactive_tint
+        };
+        let Some(tint) = tint.map(crate::protocol::color_to_u32) else {
+            continue;
+        };
         let mut right = pane.inner_rect.x.saturating_add(pane.inner_rect.width);
         let mut bottom = pane.inner_rect.y.saturating_add(pane.inner_rect.height);
         if let Some(scrollbar) = pane.scrollbar_rect {
