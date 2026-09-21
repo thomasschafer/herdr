@@ -362,7 +362,7 @@ pub(super) fn render_panes(
                 && !pane_is_scrolled_back(rt)
                 && app.pane_exposes_host_cursor(ws_idx, info.id);
             rt.render(frame, info.inner_rect, show_cursor);
-            render_inactive_pane_tint(app, frame, info);
+            render_pane_tint(app, frame, info, multi_pane);
             render_pane_scrollbar(app, frame, info, rt);
 
             let should_dim = !info.is_focused && multi_pane && !terminal_active;
@@ -413,17 +413,24 @@ pub(super) fn render_panes(
     render_pane_borders(app, ws, pane_infos, split_borders, frame);
 }
 
-/// Replace the default background of an unfocused pane with the configured
-/// inactive shade, mirroring tmux `window-style`: only cells still on the
-/// terminal's default background are tinted, explicitly colored cells keep
-/// their background.
-fn render_inactive_pane_tint(app: &AppState, frame: &mut Frame, info: &PaneInfo) {
-    let Some(tint) = app.inactive_pane_bg else {
+/// Replace the default background of a pane with the shade configured for its
+/// focus state, mirroring tmux `window-active-style` and `window-style`: only
+/// cells still on the terminal's default background are tinted, explicitly
+/// colored cells keep their background.
+fn render_pane_tint(app: &AppState, frame: &mut Frame, info: &PaneInfo, multi_pane: bool) {
+    let tint = if info.is_focused {
+        // A lone pane is always the focused one, so tinting it would recolor
+        // the whole workspace rather than tell panes apart.
+        if !multi_pane {
+            return;
+        }
+        app.active_pane_bg
+    } else {
+        app.inactive_pane_bg
+    };
+    let Some(tint) = tint else {
         return;
     };
-    if info.is_focused {
-        return;
-    }
     let host_bg = app
         .host_terminal_theme
         .background
@@ -1373,7 +1380,7 @@ mod tests {
                 let buf = frame.buffer_mut();
                 buf[(1, 0)].set_style(Style::default().bg(Color::Rgb(12, 14, 16)));
                 buf[(2, 0)].set_style(Style::default().bg(Color::Rgb(200, 10, 10)));
-                render_inactive_pane_tint(&app, frame, &unfocused);
+                render_pane_tint(&app, frame, &unfocused, true);
             })
             .unwrap();
 
@@ -1402,7 +1409,7 @@ mod tests {
 
         // Unset config: unfocused pane stays untouched.
         terminal
-            .draw(|frame| render_inactive_pane_tint(&app, frame, &pane(false)))
+            .draw(|frame| render_pane_tint(&app, frame, &pane(false), true))
             .unwrap();
         assert_eq!(
             terminal.backend().buffer()[(0, 0)].style().bg,
@@ -1412,7 +1419,7 @@ mod tests {
         // Configured tint: focused pane stays untouched.
         app.inactive_pane_bg = Some(Color::Rgb(42, 42, 55));
         terminal
-            .draw(|frame| render_inactive_pane_tint(&app, frame, &pane(true)))
+            .draw(|frame| render_pane_tint(&app, frame, &pane(true), true))
             .unwrap();
         assert_eq!(
             terminal.backend().buffer()[(0, 0)].style().bg,
@@ -1437,7 +1444,7 @@ mod tests {
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(8, 4)).unwrap();
 
         terminal
-            .draw(|frame| render_inactive_pane_tint(&app, frame, &info))
+            .draw(|frame| render_pane_tint(&app, frame, &info, true))
             .unwrap();
 
         let buffer = terminal.backend().buffer();
@@ -1446,6 +1453,75 @@ mod tests {
         // Border cells are not touched.
         assert_eq!(buffer[(0, 0)].style().bg, Some(Color::Reset));
         assert_eq!(buffer[(7, 1)].style().bg, Some(Color::Reset));
+    }
+
+    #[test]
+    fn active_pane_tint_applies_to_focused_pane_of_a_split() {
+        let mut app = AppState::test_new();
+        app.active_pane_bg = Some(Color::Rgb(40, 43, 64));
+        app.inactive_pane_bg = Some(Color::Rgb(42, 42, 55));
+        let pane = |focused| PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(0, 0, 4, 1),
+            inner_rect: Rect::new(0, 0, 4, 1),
+            scrollbar_rect: None,
+            borders: Borders::NONE,
+            is_focused: focused,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(4, 1)).unwrap();
+
+        // Each pane takes the shade for its own focus state.
+        terminal
+            .draw(|frame| render_pane_tint(&app, frame, &pane(true), true))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Rgb(40, 43, 64))
+        );
+
+        terminal
+            .draw(|frame| render_pane_tint(&app, frame, &pane(false), true))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Rgb(42, 42, 55))
+        );
+    }
+
+    #[test]
+    fn active_pane_tint_skips_lone_pane_and_unset_config() {
+        let mut app = AppState::test_new();
+        let focused = PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(0, 0, 4, 1),
+            inner_rect: Rect::new(0, 0, 4, 1),
+            scrollbar_rect: None,
+            borders: Borders::NONE,
+            is_focused: true,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(4, 1)).unwrap();
+
+        // Unset config: focused pane of a split stays untouched.
+        terminal
+            .draw(|frame| render_pane_tint(&app, frame, &focused, true))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Reset)
+        );
+
+        // Configured tint: a lone pane is left alone, so an unsplit workspace
+        // keeps the terminal's own background.
+        app.active_pane_bg = Some(Color::Rgb(40, 43, 64));
+        terminal
+            .draw(|frame| render_pane_tint(&app, frame, &focused, false))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(Color::Reset)
+        );
     }
 
     #[tokio::test]

@@ -650,6 +650,11 @@ impl App {
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
+            active_pane_bg: config
+                .ui
+                .active_pane_bg
+                .as_deref()
+                .map(crate::config::parse_color),
             inactive_pane_bg: config
                 .ui
                 .inactive_pane_bg
@@ -1500,6 +1505,11 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
+                self.state.active_pane_bg = config
+                    .ui
+                    .active_pane_bg
+                    .as_deref()
+                    .map(crate::config::parse_color);
                 self.state.inactive_pane_bg = config
                     .ui
                     .inactive_pane_bg
