@@ -638,6 +638,24 @@ fn set_local_focus(state: &mut ClientShellState, workspace_id: &str, revision: u
 }
 
 #[test]
+fn last_workspace_toggles_between_recent_workspace_ids() {
+    let mut state = local_navigation_state(false);
+    set_local_focus(&mut state, "ws_2", 2);
+    assert!(matches!(
+        state.endpoint_method_for_action(crate::input::KeybindAction::LastWorkspace),
+        Some(crate::api::schema::Method::WorkspaceFocus(target))
+            if target.workspace_id == "ws_1"
+    ));
+
+    set_local_focus(&mut state, "ws_1", 3);
+    assert!(matches!(
+        state.endpoint_method_for_action(crate::input::KeybindAction::LastWorkspace),
+        Some(crate::api::schema::Method::WorkspaceFocus(target))
+            if target.workspace_id == "ws_2"
+    ));
+}
+
+#[test]
 fn accepted_local_navigation_keeps_highlight_until_authoritative_focus() {
     for compact in [false, true] {
         for response_first in [false, true] {
