@@ -112,8 +112,15 @@ impl ClientShellState {
     /// so any plain text is a commit (kitty sends those as text too). A legacy
     /// host sends both as plain text; non-ASCII text has no key in the
     /// keyboard model, so only that is treated as a commit there.
+    ///
+    /// Prefix and navigate modes match keybindings rather than forwarding text,
+    /// so plain text there stays a key. Terminal key bindings that send a
+    /// literal prefix byte plus text (e.g. Ghostty's `text:\x01K`) rely on this.
     fn host_text_commit(&self, key: &crate::input::TerminalKey) -> Option<String> {
-        if !self.host_reports_all_keys || key.kind != KeyEventKind::Press {
+        if !self.host_reports_all_keys
+            || key.kind != KeyEventKind::Press
+            || self.host_keyboard_report_all_requested()
+        {
             return None;
         }
         let plain_text = key

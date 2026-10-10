@@ -958,3 +958,58 @@ fn every_configured_prefix_enters_prefix_mode() {
         assert_eq!(state.mode, ClientShellMode::Terminal);
     }
 }
+
+#[test]
+fn plain_text_after_prefix_on_report_all_host_matches_keybindings() {
+    let config: Config = toml::from_str(
+        r#"
+[keys]
+prefix = "ctrl+a"
+focus_pane_up = "prefix+shift+k"
+"#,
+    )
+    .expect("test config parses");
+    let report_all_state = || {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_host_reports_key_releases(true);
+        state.set_host_reports_all_keys(true);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state
+    };
+
+    // Terminal key bindings that send a literal prefix byte followed by the
+    // key as text, e.g. Ghostty's `text:\x01K`.
+    for chunks in [vec![&b"\x01"[..], b"K"], vec![&b"\x01K"[..]]] {
+        let mut state = report_all_state();
+        let mut actions = Vec::new();
+        for chunk in &chunks {
+            actions.extend(state.handle_input_bytes(chunk).actions);
+        }
+        let [ClientShellAction::Endpoint { request, .. }] = actions.as_slice() else {
+            panic!("expected a directional focus request for {chunks:?}, got {actions:?}");
+        };
+        let crate::api::schema::Method::PaneFocusDirection(params) = &request.method else {
+            panic!("expected PaneFocusDirection, got {:?}", request.method);
+        };
+        assert_eq!(params.direction, crate::api::schema::PaneDirection::Up);
+        assert_eq!(state.mode, ClientShellMode::Terminal);
+    }
+
+    let mut state = report_all_state();
+    let outcome = state.handle_input_bytes(b"K");
+    let pane_events: Vec<_> = outcome
+        .requests
+        .into_iter()
+        .filter_map(|request| match request {
+            ClientMessage::ClientShellPaneInput { events, .. } => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(
+        pane_events,
+        [ClientPaneInputEvent::TextCommit("K".into())],
+        "outside Herdr's key modes, plain text from a report-all host stays a text commit"
+    );
+}

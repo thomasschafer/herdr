@@ -71,7 +71,13 @@ mod tests {
     #[test]
     fn tab_create_with_trailing_argv_sends_create_command() {
         let request = bindings::request(&args(&[
-            "create", "--workspace", "2", "--focus", "--", "nvim", "notes.md",
+            "create",
+            "--workspace",
+            "2",
+            "--focus",
+            "--",
+            "nvim",
+            "notes.md",
         ]))
         .unwrap();
         assert_eq!(
