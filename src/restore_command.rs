@@ -131,6 +131,12 @@ pub fn restorable_argv(
     Some(restored)
 }
 
+/// Whether a saved command's program is in the allowlist.
+pub fn is_allowlisted(argv: &[String], allowlist: &[RestoreCommandName]) -> bool {
+    argv.first()
+        .is_some_and(|command| allowlist.iter().any(|name| name.as_str() == command))
+}
+
 /// Builds the launch plan for a saved command when its program is still
 /// allowlisted.
 pub fn plan(
@@ -140,7 +146,7 @@ pub fn plan(
     restore_key: Option<&RestoreKey>,
 ) -> Option<crate::agent_resume::AgentResumePlan> {
     let command = argv.first()?;
-    if !allowlist.iter().any(|name| name.as_str() == command) {
+    if !is_allowlisted(argv, allowlist) {
         return None;
     }
     crate::agent_resume::validate_resume_argv(argv).ok()?;
@@ -151,6 +157,7 @@ pub fn plan(
         |key| key.as_str().to_string(),
     );
     Some(crate::agent_resume::AgentResumePlan {
+        kind: crate::agent_resume::ResumePlanKind::RestoreCommand,
         agent: command.clone(),
         argv: argv.to_vec(),
         dedupe_key: format!("{RESTORE_COMMAND_SOURCE}\u{0}{identity}"),

@@ -44,6 +44,7 @@ use self::agent_detection::{
 use self::background_agent::{AgentJobStatus, AgentJobTracker};
 #[cfg(test)]
 pub(crate) use self::terminal::test_encode_key_for_app;
+#[cfg(unix)]
 pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub(crate) use self::terminal::{
@@ -54,7 +55,6 @@ pub use self::{
     state::PaneState,
     terminal::{ScrollMetrics, TerminalCursorState},
 };
-#[cfg(unix)]
 use crate::restore_command::ForegroundObservation;
 
 pub(crate) struct TerminalDirtyPatchSnapshot {

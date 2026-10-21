@@ -20,8 +20,18 @@ pub enum AgentSessionRefKind {
     Path,
 }
 
+/// What a resume plan starts again, which decides how it is revalidated
+/// before launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumePlanKind {
+    Agent,
+    /// An allowlisted program from `[session] restore_commands`.
+    RestoreCommand,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentResumePlan {
+    pub kind: ResumePlanKind,
     pub agent: String,
     pub argv: Vec<String>,
     pub dedupe_key: String,
@@ -40,6 +50,7 @@ impl ReportedAgentResume {
     /// for example `agent --continue`, so the directory is part of its identity.
     pub fn plan(&self, cwd: &Path) -> AgentResumePlan {
         AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: self.agent.clone(),
             argv: self.argv.clone(),
             dedupe_key: format!(
@@ -314,6 +325,7 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
     };
 
     Some(AgentResumePlan {
+        kind: crate::agent_resume::ResumePlanKind::Agent,
         agent: agent.to_string(),
         argv,
         dedupe_key: dedupe_key(source, agent, session_ref),

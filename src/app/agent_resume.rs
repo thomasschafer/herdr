@@ -295,9 +295,19 @@ impl App {
             }
         };
 
-        let mut input = resume_command;
-        input.push('\r');
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(input)) {
+        // The allowlist may have changed by config reload since the session
+        // was restored. The pane still gets its shell, just not the command.
+        let command_withdrawn = plan.kind == crate::agent_resume::ResumePlanKind::RestoreCommand
+            && !crate::restore_command::is_allowlisted(&plan.argv, &self.state.restore_commands);
+        if command_withdrawn {
+            tracing::info!(
+                pane = pane_id.raw(),
+                terminal = %terminal_id,
+                command = %plan.agent,
+                "skipping restore command that is no longer allowlisted"
+            );
+        } else if let Err(err) = runtime.try_send_bytes(Bytes::from(format!("{resume_command}\r")))
+        {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,
@@ -313,6 +323,9 @@ impl App {
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
             terminal.respawn_shell_on_exit = false;
+            if command_withdrawn {
+                terminal.set_restore_command(None);
+            }
         }
         true
     }
@@ -424,6 +437,7 @@ mod tests {
             for terminal in app.state.terminals.values_mut() {
                 terminal.cwd = missing.clone();
                 terminal.pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+                    kind: crate::agent_resume::ResumePlanKind::Agent,
                     agent: "codex".into(),
                     argv: vec!["codex".into()],
                     dedupe_key: terminal.id.to_string(),
@@ -519,6 +533,7 @@ mod tests {
             };
             terminal.persisted_agent_session = Some(session.clone());
             terminal.pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+                kind: crate::agent_resume::ResumePlanKind::Agent,
                 agent: "codex".into(),
                 argv: long_running_test_argv(),
                 dedupe_key: "resume-test".into(),
@@ -555,6 +570,7 @@ mod tests {
             .get_mut(&terminal_id)
             .expect("test terminal should exist");
         terminal.pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: marker_resume_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
@@ -633,6 +649,7 @@ mod tests {
             .get_mut(&terminal_id)
             .expect("test terminal should exist")
             .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
@@ -642,6 +659,47 @@ mod tests {
         assert!(!app.start_pending_agent_resumes(Instant::now(), false));
         assert!(app.start_pending_agent_resumes(Instant::now(), true));
         assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn pending_restore_command_removed_from_the_allowlist_starts_only_the_shell() {
+        let mut app = test_app();
+        let workspace = crate::workspace::Workspace::test_new("restored");
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
+        app.state.view.pane_infos = workspace.tabs[0]
+            .layout
+            .panes(ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let argv = vec!["hx".to_string(), "a.rs".to_string()];
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.pending_agent_resume_plan = crate::restore_command::plan(
+            &argv,
+            &[crate::restore_command::RestoreCommandName::try_from("hx".to_string()).unwrap()],
+            std::path::Path::new("/"),
+            None,
+        );
+        terminal.set_restore_command(Some(argv));
+        app.state.set_restore_commands(Vec::new());
+
+        assert!(app.start_pending_agent_resumes(Instant::now(), true));
+
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+        let terminal = &app.state.terminals[&terminal_id];
+        assert!(terminal.pending_agent_resume_plan.is_none());
+        assert_eq!(terminal.restore_command(), None);
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
@@ -684,6 +742,7 @@ mod tests {
                 .get_mut(terminal_id)
                 .expect("test terminal should exist")
                 .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+                kind: crate::agent_resume::ResumePlanKind::Agent,
                 agent: "codex".into(),
                 argv: long_running_test_argv(),
                 dedupe_key: format!("herdr:codex\0codex\0Id\0{terminal_id}"),
@@ -754,6 +813,7 @@ mod tests {
             .get_mut(&inactive_terminal)
             .expect("inactive tab terminal should exist")
             .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0inactive-tab-session".into(),
@@ -815,6 +875,7 @@ mod tests {
             .get_mut(&hidden_terminal)
             .expect("hidden zoom pane terminal should exist")
             .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0zoom-hidden-session".into(),
@@ -873,6 +934,7 @@ mod tests {
             .get_mut(&previous_terminal)
             .expect("test terminal should exist")
             .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
@@ -934,6 +996,7 @@ mod tests {
             .get_mut(&terminal_id)
             .expect("test terminal should exist")
             .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            kind: crate::agent_resume::ResumePlanKind::Agent,
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
