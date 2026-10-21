@@ -926,7 +926,8 @@ impl App {
         }
 
         if !invalid_section("session") {
-            self.state.restore_commands = config.session.restore_commands.clone();
+            self.state
+                .set_restore_commands(config.session.restore_commands.clone());
         }
 
         if !invalid_section("session")

@@ -44,7 +44,6 @@ use self::agent_detection::{
 use self::background_agent::{AgentJobStatus, AgentJobTracker};
 #[cfg(test)]
 pub(crate) use self::terminal::test_encode_key_for_app;
-#[cfg(unix)]
 pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub(crate) use self::terminal::{
@@ -55,6 +54,8 @@ pub use self::{
     state::PaneState,
     terminal::{ScrollMetrics, TerminalCursorState},
 };
+#[cfg(unix)]
+use crate::restore_command::ForegroundObservation;
 
 pub(crate) struct TerminalDirtyPatchSnapshot {
     pub patch: TerminalDirtyPatchOutcome,
@@ -822,26 +823,15 @@ struct ProcessProbeResult {
     /// The process that identified as `agent`, which need not lead its job.
     agent_pid: Option<u32>,
     process_name: Option<String>,
-    foreground_command: ForegroundCommandProbe,
+    foreground_command: ForegroundObservation,
 }
 
-/// What a probe saw of a non-agent program leading the foreground job.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ForegroundCommandProbe {
-    /// The job could not be inspected, so the last observation still stands.
-    Unobserved,
-    /// `None` when the pane shell or an agent is in the foreground.
-    Observed(Option<crate::restore_command::ForegroundCommand>),
-}
-
-fn foreground_command_in_job(
-    job: &crate::platform::ForegroundJob,
-    shell_pid: u32,
-) -> ForegroundCommandProbe {
-    if job.processes.iter().any(|process| process.pid == shell_pid) {
-        return ForegroundCommandProbe::Observed(None);
-    }
-    ForegroundCommandProbe::Observed(
+/// Reports the job leader even when it is the pane's own process, because a
+/// pane launched with a command, or a shell that ran `exec`, has the program
+/// itself in that place. The app ignores leaders that are not allowlisted,
+/// which includes the shell.
+fn foreground_command_in_job(job: &crate::platform::ForegroundJob) -> ForegroundObservation {
+    ForegroundObservation::Observed(
         job.processes
             .iter()
             .find(|process| process.pid == job.process_group_id)
@@ -858,9 +848,9 @@ async fn publish_foreground_command_change(
     state_events: &mpsc::Sender<AppEvent>,
     pane_id: PaneId,
     published: &mut Option<Option<crate::restore_command::ForegroundCommand>>,
-    probe: ForegroundCommandProbe,
+    probe: ForegroundObservation,
 ) {
-    let ForegroundCommandProbe::Observed(command) = probe else {
+    let ForegroundObservation::Observed(command) = probe else {
         return;
     };
     if published.as_ref() == Some(&command) {
@@ -923,7 +913,7 @@ fn process_probe_result(
         agent: Some(agent),
         agent_pid: Some(agent_pid),
         process_name: Some(process_name),
-        foreground_command: ForegroundCommandProbe::Observed(None),
+        foreground_command: ForegroundObservation::Observed(None),
     }
 }
 
@@ -979,7 +969,7 @@ fn probe_foreground_process_from_jobs(
             agent: None,
             agent_pid: None,
             process_name: None,
-            foreground_command: foreground_command_in_job(job, pid),
+            foreground_command: foreground_command_in_job(job),
         };
     }
 
@@ -991,9 +981,7 @@ fn probe_foreground_process_from_jobs(
         process_name: None,
         foreground_command: leader_job
             .as_ref()
-            .map_or(ForegroundCommandProbe::Unobserved, |job| {
-                foreground_command_in_job(job, pid)
-            }),
+            .map_or(ForegroundObservation::Unobserved, foreground_command_in_job),
     }
 }
 
@@ -6185,23 +6173,36 @@ mod tests {
         }
     }
 
-    fn observed_command(name: &str, argv: &[&str]) -> ForegroundCommandProbe {
-        ForegroundCommandProbe::Observed(Some(crate::restore_command::ForegroundCommand {
+    fn observed_command(name: &str, argv: &[&str]) -> ForegroundObservation {
+        ForegroundObservation::Observed(Some(crate::restore_command::ForegroundCommand {
             process_name: name.to_string(),
             argv: Some(argv.iter().map(|arg| arg.to_string()).collect()),
         }))
     }
 
     #[test]
-    fn foreground_command_in_job_is_none_while_the_shell_is_in_the_job() {
+    fn foreground_command_in_job_reports_the_shell_when_it_leads() {
         let job = crate::platform::ForegroundJob {
             process_group_id: 42,
             processes: vec![foreground_process_with_argv(42, "zsh", &["-zsh"])],
         };
 
         assert_eq!(
-            foreground_command_in_job(&job, 42),
-            ForegroundCommandProbe::Observed(None)
+            foreground_command_in_job(&job),
+            observed_command("zsh", &["-zsh"])
+        );
+    }
+
+    #[test]
+    fn foreground_command_in_job_reports_a_program_that_replaced_the_shell() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![foreground_process_with_argv(42, "hx", &["hx", "a.rs"])],
+        };
+
+        assert_eq!(
+            foreground_command_in_job(&job),
+            observed_command("hx", &["hx", "a.rs"])
         );
     }
 
@@ -6216,7 +6217,7 @@ mod tests {
         };
 
         assert_eq!(
-            foreground_command_in_job(&job, 42),
+            foreground_command_in_job(&job),
             observed_command("hx", &["hx", "src/main.rs"])
         );
     }
@@ -6229,8 +6230,8 @@ mod tests {
         };
 
         assert_eq!(
-            foreground_command_in_job(&job, 42),
-            ForegroundCommandProbe::Observed(None)
+            foreground_command_in_job(&job),
+            ForegroundObservation::Observed(None)
         );
     }
 
@@ -6246,7 +6247,7 @@ mod tests {
         assert_eq!(result.agent, Some(Agent::Claude));
         assert_eq!(
             result.foreground_command,
-            ForegroundCommandProbe::Observed(None)
+            ForegroundObservation::Observed(None)
         );
     }
 
@@ -6281,10 +6282,7 @@ mod tests {
     fn probe_without_any_job_leaves_the_foreground_command_unobserved() {
         let result = probe_foreground_process_from_jobs(42, Some(99), None, || None, |_| None);
 
-        assert_eq!(
-            result.foreground_command,
-            ForegroundCommandProbe::Unobserved
-        );
+        assert_eq!(result.foreground_command, ForegroundObservation::Unobserved);
     }
 
     #[test]
@@ -6308,13 +6306,13 @@ mod tests {
         let hx = observed_command("hx", &["hx"]);
 
         for probe in [
-            ForegroundCommandProbe::Unobserved,
-            ForegroundCommandProbe::Observed(None),
-            ForegroundCommandProbe::Observed(None),
-            ForegroundCommandProbe::Unobserved,
+            ForegroundObservation::Unobserved,
+            ForegroundObservation::Observed(None),
+            ForegroundObservation::Observed(None),
+            ForegroundObservation::Unobserved,
             hx.clone(),
             hx.clone(),
-            ForegroundCommandProbe::Observed(None),
+            ForegroundObservation::Observed(None),
         ] {
             publish_foreground_command_change(&tx, pane_id, &mut published, probe).await;
         }

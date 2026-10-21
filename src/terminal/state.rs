@@ -168,6 +168,7 @@ pub struct TerminalState {
     /// Command line of the allowlisted program in the foreground, typed into
     /// the pane's shell again when the session is restored.
     restore_command: Option<Vec<String>>,
+    foreground: crate::restore_command::ForegroundObservation,
 }
 
 impl TerminalState {
@@ -206,6 +207,7 @@ impl TerminalState {
             respawn_shell_on_exit: false,
             restore_key: crate::restore_command::RestoreKey::generate(),
             restore_command: None,
+            foreground: crate::restore_command::ForegroundObservation::Unobserved,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
@@ -319,6 +321,34 @@ impl TerminalState {
         }
         self.restore_command = argv;
         true
+    }
+
+    /// Records the foreground job leader and derives the restore command from
+    /// it. Returns whether the saved session needs updating.
+    pub fn observe_foreground_command(
+        &mut self,
+        command: Option<crate::restore_command::ForegroundCommand>,
+        allowlist: &[crate::restore_command::RestoreCommandName],
+    ) -> bool {
+        self.foreground = crate::restore_command::ForegroundObservation::Observed(command);
+        self.reapply_restore_commands(allowlist)
+    }
+
+    /// Applies a changed allowlist to the last observation. A terminal that has
+    /// not been observed keeps its command, such as one restored from a saved
+    /// session that has not started yet.
+    pub fn reapply_restore_commands(
+        &mut self,
+        allowlist: &[crate::restore_command::RestoreCommandName],
+    ) -> bool {
+        let crate::restore_command::ForegroundObservation::Observed(command) = &self.foreground
+        else {
+            return false;
+        };
+        let argv = command
+            .as_ref()
+            .and_then(|command| crate::restore_command::restorable_argv(command, allowlist));
+        self.set_restore_command(argv)
     }
 
     #[cfg(any(windows, test))]
@@ -2389,6 +2419,7 @@ impl TerminalState {
         self.agent_process_acquisition_pending = false;
         self.pending_agent_resume_plan = None;
         self.restore_command = None;
+        self.foreground = crate::restore_command::ForegroundObservation::Unobserved;
         self.clear_agent_name();
     }
 
@@ -6277,6 +6308,18 @@ mod tests {
         );
         assert!(terminal.set_restore_command(None));
         assert_eq!(terminal.restore_command(), None);
+    }
+
+    #[test]
+    fn reapplying_restore_commands_keeps_a_command_that_was_never_observed() {
+        let mut terminal = test_terminal();
+        terminal.set_restore_command(Some(vec!["hx".to_string()]));
+
+        assert!(!terminal.reapply_restore_commands(&[]));
+        assert_eq!(
+            terminal.restore_command(),
+            Some(["hx".to_string()].as_slice())
+        );
     }
 
     #[test]

@@ -42,6 +42,34 @@ impl RestorePolicy<'_> {
     }
 }
 
+/// Identities a restore pass has handed out, so that a damaged snapshot cannot
+/// give two panes the same agent session or restore key.
+#[derive(Default)]
+struct RestoreClaims {
+    agent_sessions: HashSet<String>,
+    restore_keys: HashSet<String>,
+}
+
+impl RestoreClaims {
+    fn claim_restore_key(
+        &mut self,
+        pane: Option<&super::snapshot::PaneSnapshot>,
+    ) -> crate::restore_command::RestoreKey {
+        if let Some(restore_key) = saved_restore_key(pane) {
+            if self.restore_keys.insert(restore_key.as_str().to_string()) {
+                return restore_key;
+            }
+            warn!(
+                restore_key = restore_key.as_str(),
+                "replacing a restore key that another saved pane already uses"
+            );
+        }
+        let restore_key = crate::restore_command::RestoreKey::generate();
+        self.restore_keys.insert(restore_key.as_str().to_string());
+        restore_key
+    }
+}
+
 struct AgentRestoreState<'a> {
     policy: RestorePolicy<'a>,
     resumed_sessions: &'a mut HashSet<String>,
@@ -300,7 +328,7 @@ fn restore_with_imports_and_failures(
     let mut workspaces = Vec::new();
     let mut terminals = HashMap::new();
     let mut terminal_runtimes = HashMap::new();
-    let mut resumed_agent_sessions = HashSet::new();
+    let mut claims = RestoreClaims::default();
     let mut failed_imports = 0;
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
         let runtime_context = RestoreRuntimeContext {
@@ -317,7 +345,7 @@ fn restore_with_imports_and_failures(
             rows,
             cols,
             &runtime_context,
-            &mut resumed_agent_sessions,
+            &mut claims,
             imported_panes,
         );
         failed_imports += workspace_failed_imports;
@@ -339,7 +367,7 @@ fn restore_workspace(
     rows: u16,
     cols: u16,
     runtime_context: &RestoreRuntimeContext<'_>,
-    resumed_agent_sessions: &mut HashSet<String>,
+    claims: &mut RestoreClaims,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
 ) -> RestoreFailures<Option<RestoredWorkspace>> {
     let mut tabs = Vec::new();
@@ -393,7 +421,7 @@ fn restore_workspace(
             rows,
             cols,
             runtime_context,
-            resumed_agent_sessions,
+            claims,
             imported_panes,
             &public_pane_ids_by_old_raw,
         );
@@ -464,16 +492,14 @@ fn restore_workspace(
 fn unavailable_restored_terminal(
     pane: Option<&super::snapshot::PaneSnapshot>,
     cwd: PathBuf,
+    restore_key: crate::restore_command::RestoreKey,
     reason: String,
 ) -> TerminalState {
     warn!(cwd = %cwd.display(), reason = %reason, "preserving unavailable restored pane");
-    let mut terminal = TerminalState::new(TerminalId::alloc(), cwd);
+    // Keep what the pane had so a later restart can still restore it.
+    let mut terminal = TerminalState::new(TerminalId::alloc(), cwd).with_restore_key(restore_key);
     terminal.restore_error = Some(reason);
     if let Some(pane) = pane {
-        // Keep what the pane had so a later restart can still restore it.
-        if let Some(restore_key) = saved_restore_key(Some(pane)) {
-            terminal = terminal.with_restore_key(restore_key);
-        }
         terminal.set_restore_command(pane.restore_command.clone());
         terminal.manual_label = pane.label.clone();
         terminal.launch_argv = pane.launch_argv.clone();
@@ -522,7 +548,7 @@ fn restore_tab(
     rows: u16,
     cols: u16,
     runtime_context: &RestoreRuntimeContext<'_>,
-    resumed_agent_sessions: &mut HashSet<String>,
+    claims: &mut RestoreClaims,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
     public_pane_ids_by_old_raw: &HashMap<u32, String>,
 ) -> RestoreFailures<Option<RestoredTab>> {
@@ -545,11 +571,13 @@ fn restore_tab(
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
 
         let cwd = saved_cwd;
+        let restore_key = claims.claim_restore_key(saved_pane);
         let has_import = old_id.is_some_and(|old_id| imported_panes.contains_key(old_id));
         if !has_import && !cwd.is_dir() {
             let terminal = unavailable_restored_terminal(
                 saved_pane,
                 cwd,
+                restore_key,
                 "Saved directory is unavailable. Restore the directory and restart this session."
                     .into(),
             );
@@ -568,12 +596,10 @@ fn restore_tab(
         let saved_agent_resume = saved_pane.and_then(saved_reported_resume);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
-        let restore_key = saved_restore_key(saved_pane)
-            .unwrap_or_else(crate::restore_command::RestoreKey::generate);
         let startup = {
             let mut agent_restore = AgentRestoreState {
                 policy: runtime_context.policy,
-                resumed_sessions: resumed_agent_sessions,
+                resumed_sessions: &mut claims.agent_sessions,
             };
             pane_restore_startup(
                 saved_agent_session,
@@ -770,7 +796,7 @@ fn restore_tab(
             }
             Err(e) => {
                 if let Some(key) = startup.reserved_agent_session.as_deref() {
-                    resumed_agent_sessions.remove(key);
+                    claims.agent_sessions.remove(key);
                 }
                 if was_imported {
                     failed_imports += 1;
@@ -789,7 +815,7 @@ fn restore_tab(
                 );
                 if !was_imported {
                     let terminal = unavailable_restored_terminal(
-                        saved_pane, cwd,
+                        saved_pane, cwd, restore_key,
                         format!("Could not start the saved shell: {e}. Fix the shell configuration and restart this session."),
                     );
                     panes.insert(*id, PaneState::new(terminal.id.clone()));
@@ -2376,6 +2402,21 @@ mod tests {
             crate::restore_command::RestoreKey::parse(terminal.restore_key.as_str()).as_ref(),
             Some(&terminal.restore_key)
         );
+    }
+
+    #[test]
+    fn restore_claims_replace_a_restore_key_already_used_by_another_pane() {
+        let mut claims = RestoreClaims::default();
+        let pane = command_pane(PathBuf::from("/a"), Some("rk_saved"), None);
+
+        let first = claims.claim_restore_key(Some(&pane));
+        let second = claims.claim_restore_key(Some(&pane));
+        let unsaved = claims.claim_restore_key(None);
+
+        assert_eq!(first.as_str(), "rk_saved");
+        assert_ne!(second, first);
+        assert_ne!(unsaved, first);
+        assert_ne!(unsaved, second);
     }
 
     #[test]

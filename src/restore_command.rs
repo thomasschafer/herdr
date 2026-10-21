@@ -82,6 +82,17 @@ pub struct ForegroundCommand {
     pub argv: Option<Vec<String>>,
 }
 
+/// The leader of a pane's foreground job as last seen, kept so the allowlist
+/// can be applied again when it changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ForegroundObservation {
+    /// No job could be inspected yet, or since the pane's process changed.
+    #[default]
+    Unobserved,
+    /// `None` when an agent leads the job or the job has no leader.
+    Observed(Option<ForegroundCommand>),
+}
+
 /// The command to type into the restored shell, or `None` when the program is
 /// not allowlisted or its command line cannot be replayed safely.
 ///

@@ -899,6 +899,20 @@ impl AppState {
         self.session_dirty = true;
     }
 
+    /// Programs already in the foreground are remembered or forgotten at once,
+    /// rather than only when their pane's foreground changes next.
+    pub(crate) fn set_restore_commands(
+        &mut self,
+        restore_commands: Vec<crate::restore_command::RestoreCommandName>,
+    ) {
+        self.restore_commands = restore_commands;
+        for terminal in self.terminals.values_mut() {
+            if terminal.reapply_restore_commands(&self.restore_commands) {
+                self.session_dirty = true;
+            }
+        }
+    }
+
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
         self.pane_id_aliases.remove(&pane_id.raw());
     }

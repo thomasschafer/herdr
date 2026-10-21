@@ -1532,12 +1532,10 @@ impl AppState {
                 .into_iter()
                 .collect(),
             AppEvent::ForegroundCommandChanged { pane_id, command } => {
-                let argv = command.and_then(|command| {
-                    crate::restore_command::restorable_argv(&command, &self.restore_commands)
-                });
+                let allowlist = self.restore_commands.clone();
                 let mut changed = false;
                 self.update_terminal_state(pane_id, |terminal| {
-                    changed = terminal.set_restore_command(argv);
+                    changed = terminal.observe_foreground_command(command, &allowlist);
                     None
                 });
                 if changed {
@@ -3911,6 +3909,27 @@ mod tests {
 
         assert_eq!(state.terminals[&terminal_id].restore_command(), None);
         assert!(!state.session_dirty);
+    }
+
+    #[test]
+    fn allowlist_changes_apply_to_programs_already_in_the_foreground() {
+        let mut state = app_with_workspaces(&["one"]);
+        let (pane_id, terminal_id) = first_pane_terminal(&state);
+        observe_foreground(&mut state, pane_id, Some(("hx", &["hx", "a.rs"])));
+        assert_eq!(state.terminals[&terminal_id].restore_command(), None);
+        state.session_dirty = false;
+
+        state.set_restore_commands(restore_commands(&["hx"]));
+        assert_eq!(
+            state.terminals[&terminal_id].restore_command(),
+            Some(["hx".to_string(), "a.rs".to_string()].as_slice())
+        );
+        assert!(state.session_dirty);
+
+        state.session_dirty = false;
+        state.set_restore_commands(Vec::new());
+        assert_eq!(state.terminals[&terminal_id].restore_command(), None);
+        assert!(state.session_dirty);
     }
 
     #[test]

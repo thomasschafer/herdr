@@ -128,8 +128,8 @@ pub enum AppEvent {
         seq: Option<u64>,
         argv: Vec<String>,
     },
-    /// The pane's foreground program changed. `None` means the pane shell or
-    /// an agent is in the foreground.
+    /// The leader of the pane's foreground job changed. `None` means an agent
+    /// leads the job or the job has no leader.
     ForegroundCommandChanged {
         pane_id: PaneId,
         command: Option<crate::restore_command::ForegroundCommand>,
