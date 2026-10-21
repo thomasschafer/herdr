@@ -364,6 +364,7 @@ impl Workspace {
             id.clone(),
             public_tab_id_for_number(&id, 1),
             public_pane_id_for_number(&id, 1),
+            crate::restore_command::RestoreKey::generate(),
         );
         let (tab, terminal, runtime) = if let Some(argv) = argv {
             Tab::new_argv_command(
@@ -986,6 +987,7 @@ impl Workspace {
             self.id.clone(),
             public_tab_id_for_number(&self.id, tab_number),
             public_pane_id_for_number(&self.id, pane_number),
+            crate::restore_command::RestoreKey::generate(),
         )
     }
 
@@ -1453,6 +1455,60 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn new_pane_terminal_keeps_the_restore_key_its_process_received() {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-restore-key-env-{}-{}",
+            std::process::id(),
+            crate::restore_command::RestoreKey::generate().as_str()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("restore-key");
+        let mut ws = Workspace::test_new("restore-key");
+        let root = ws.tabs[0].root_pane;
+        let argv = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!(
+                "printf %s \"$HERDR_PANE_RESTORE_KEY\" > {}",
+                output.display()
+            ),
+        ];
+
+        let (_, new_pane) = ws
+            .split_pane_argv_command(
+                root,
+                Direction::Horizontal,
+                24,
+                80,
+                Some(dir.clone()),
+                &argv,
+                Vec::new(),
+                1024 * 1024,
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                false,
+            )
+            .expect("split target exists")
+            .expect("spawn pane command");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let exported = loop {
+            match std::fs::read_to_string(&output) {
+                Ok(value) if !value.is_empty() => break value,
+                _ if std::time::Instant::now() >= deadline => {
+                    panic!("pane command did not report its restore key")
+                }
+                _ => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+            }
+        };
+        new_pane.runtime.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(exported, new_pane.terminal.restore_key.as_str());
+    }
 
     #[test]
     fn generated_workspace_ids_are_short_base32_handles() {

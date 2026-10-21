@@ -162,6 +162,12 @@ pub struct TerminalState {
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
     pub restore_error: Option<String>,
+    /// Exported to pane processes as `HERDR_PANE_RESTORE_KEY` and kept across
+    /// Herdr restarts. Launches must use this terminal's key, not a new one.
+    pub restore_key: crate::restore_command::RestoreKey,
+    /// Command line of the allowlisted program in the foreground, typed into
+    /// the pane's shell again when the session is restored.
+    restore_command: Option<Vec<String>>,
 }
 
 impl TerminalState {
@@ -198,6 +204,8 @@ impl TerminalState {
             revision: 0,
             launch_argv: None,
             respawn_shell_on_exit: false,
+            restore_key: crate::restore_command::RestoreKey::generate(),
+            restore_command: None,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
@@ -293,6 +301,24 @@ impl TerminalState {
     pub fn with_respawn_shell_on_exit(mut self) -> Self {
         self.respawn_shell_on_exit = true;
         self
+    }
+
+    pub fn with_restore_key(mut self, restore_key: crate::restore_command::RestoreKey) -> Self {
+        self.restore_key = restore_key;
+        self
+    }
+
+    pub fn restore_command(&self) -> Option<&[String]> {
+        self.restore_command.as_deref()
+    }
+
+    /// Returns whether the saved session needs updating.
+    pub fn set_restore_command(&mut self, argv: Option<Vec<String>>) -> bool {
+        if self.restore_command == argv {
+            return false;
+        }
+        self.restore_command = argv;
+        true
     }
 
     #[cfg(any(windows, test))]
@@ -2362,6 +2388,7 @@ impl TerminalState {
         self.recent_agent_process_exit = None;
         self.agent_process_acquisition_pending = false;
         self.pending_agent_resume_plan = None;
+        self.restore_command = None;
         self.clear_agent_name();
     }
 
@@ -6221,15 +6248,35 @@ mod tests {
         });
         terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
         terminal.set_detected_agent_process_at(Agent::Codex, Instant::now());
+        terminal.set_restore_command(Some(vec!["hx".into()]));
+        let restore_key = terminal.restore_key.clone();
 
         terminal.clear_agent_runtime_identity_after_respawn();
 
+        assert_eq!(terminal.restore_command(), None);
+        assert_eq!(terminal.restore_key, restore_key);
         assert_eq!(terminal.state, AgentState::Unknown);
         assert!(terminal.detected_agent.is_none());
         assert!(terminal.agent_name.is_none());
         assert!(terminal.persisted_agent_session.is_none());
         assert!(!terminal.respawn_shell_on_exit);
         assert!(!terminal.finish_agent_process_acquisition());
+    }
+
+    #[test]
+    fn set_restore_command_reports_only_changes() {
+        let mut terminal = test_terminal();
+        let hx = Some(vec!["hx".to_string(), "a.rs".to_string()]);
+
+        assert!(!terminal.set_restore_command(None));
+        assert!(terminal.set_restore_command(hx.clone()));
+        assert!(!terminal.set_restore_command(hx));
+        assert_eq!(
+            terminal.restore_command(),
+            Some(["hx".to_string(), "a.rs".to_string()].as_slice())
+        );
+        assert!(terminal.set_restore_command(None));
+        assert_eq!(terminal.restore_command(), None);
     }
 
     #[test]

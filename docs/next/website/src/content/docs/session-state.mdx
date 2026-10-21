@@ -114,6 +114,21 @@ Unsupported, missing, invalid, duplicated, or stale session references restore a
 
 If native agent session restore applies to a pane, Herdr resumes the agent session instead of replaying saved pane history for that pane.
 
+## Restore commands
+
+Herdr can also start other programs again after a server restart, such as an editor. List their command names in the config file:
+
+```toml
+[session]
+restore_commands = ["hx", "nvim"]
+```
+
+While a listed program runs in the foreground of a pane, Herdr remembers its command line. After a server restart, Herdr types that command into the restored pane's shell in the saved directory. The command runs through `PATH` with its original arguments, so relative paths resolve against the pane directory. A program started inside another one, such as an editor opened by `git commit`, is not restored.
+
+Restore commands are off by default. Agent session restore takes precedence when a pane has both. Herdr does not remember a command it cannot replay safely, such as one with an argument containing an apostrophe, and logs why. If a pane restores a command, Herdr does not replay saved pane history for it.
+
+Every pane also gets a `HERDR_PANE_RESTORE_KEY` environment variable. It stays the same for that pane across server restarts and is different for every pane, so a restored program can use it to find state it saved for that pane, such as its open files.
+
 ## Live handoff
 
 Live handoff is for update and remote attach flows that need to replace a running Herdr server. It asks the old server to transfer live panes to the new server, so pane processes can keep running across the server replacement.

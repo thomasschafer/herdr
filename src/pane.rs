@@ -149,6 +149,7 @@ enum PaneLaunchIdentity {
         workspace_id: String,
         tab_id: String,
         pane_id: String,
+        restore_key: crate::restore_command::RestoreKey,
     },
     OmitPane,
 }
@@ -166,13 +167,24 @@ impl PaneLaunchEnv {
         workspace_id: String,
         tab_id: String,
         pane_id: String,
+        restore_key: crate::restore_command::RestoreKey,
     ) -> Self {
         self.identity = PaneLaunchIdentity::Managed {
             workspace_id,
             tab_id,
             pane_id,
+            restore_key,
         };
         self
+    }
+
+    /// The key a terminal launched with this env must keep, so later launches
+    /// in the same pane and saved sessions export the same value.
+    pub(crate) fn restore_key(&self) -> Option<&crate::restore_command::RestoreKey> {
+        match &self.identity {
+            PaneLaunchIdentity::Managed { restore_key, .. } => Some(restore_key),
+            PaneLaunchIdentity::Inherit | PaneLaunchIdentity::OmitPane => None,
+        }
     }
 
     pub(crate) fn without_pane_identity(mut self) -> Self {
@@ -203,18 +215,28 @@ fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
     crate::integration::apply_pane_base_env(cmd);
     crate::platform::apply_pane_runtime_marker(cmd);
     match &launch_env.identity {
-        PaneLaunchIdentity::Inherit => {}
+        // A key names exactly one pane, so a process that inherits its identity
+        // from the server must not claim the key of the pane that started it.
+        PaneLaunchIdentity::Inherit => {
+            cmd.env_remove(crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR);
+        }
         PaneLaunchIdentity::Managed {
             workspace_id,
             tab_id,
             pane_id,
+            restore_key,
         } => {
             cmd.env(crate::integration::HERDR_WORKSPACE_ID_ENV_VAR, workspace_id);
             cmd.env(crate::integration::HERDR_TAB_ID_ENV_VAR, tab_id);
             cmd.env(crate::integration::HERDR_PANE_ID_ENV_VAR, pane_id);
+            cmd.env(
+                crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR,
+                restore_key.as_str(),
+            );
         }
         PaneLaunchIdentity::OmitPane => {
             cmd.env_remove(crate::integration::HERDR_PANE_ID_ENV_VAR);
+            cmd.env_remove(crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR);
         }
     }
 }
@@ -800,6 +822,61 @@ struct ProcessProbeResult {
     /// The process that identified as `agent`, which need not lead its job.
     agent_pid: Option<u32>,
     process_name: Option<String>,
+    foreground_command: ForegroundCommandProbe,
+}
+
+/// What a probe saw of a non-agent program leading the foreground job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ForegroundCommandProbe {
+    /// The job could not be inspected, so the last observation still stands.
+    Unobserved,
+    /// `None` when the pane shell or an agent is in the foreground.
+    Observed(Option<crate::restore_command::ForegroundCommand>),
+}
+
+fn foreground_command_in_job(
+    job: &crate::platform::ForegroundJob,
+    shell_pid: u32,
+) -> ForegroundCommandProbe {
+    if job.processes.iter().any(|process| process.pid == shell_pid) {
+        return ForegroundCommandProbe::Observed(None);
+    }
+    ForegroundCommandProbe::Observed(
+        job.processes
+            .iter()
+            .find(|process| process.pid == job.process_group_id)
+            .map(|leader| crate::restore_command::ForegroundCommand {
+                process_name: leader.name.clone(),
+                argv: leader.argv.clone(),
+            }),
+    )
+}
+
+/// Publishes only changes, plus the first observation so the app replaces
+/// whatever it restored for the pane.
+async fn publish_foreground_command_change(
+    state_events: &mpsc::Sender<AppEvent>,
+    pane_id: PaneId,
+    published: &mut Option<Option<crate::restore_command::ForegroundCommand>>,
+    probe: ForegroundCommandProbe,
+) {
+    let ForegroundCommandProbe::Observed(command) = probe else {
+        return;
+    };
+    if published.as_ref() == Some(&command) {
+        return;
+    }
+    *published = Some(command.clone());
+    if let Err(err) = state_events
+        .send(AppEvent::ForegroundCommandChanged { pane_id, command })
+        .await
+    {
+        warn!(
+            pane = pane_id.raw(),
+            err = %err,
+            "failed to deliver ForegroundCommandChanged event"
+        );
+    }
 }
 
 fn agent_hint_for_foreground_job_members(
@@ -846,6 +923,7 @@ fn process_probe_result(
         agent: Some(agent),
         agent_pid: Some(agent_pid),
         process_name: Some(process_name),
+        foreground_command: ForegroundCommandProbe::Observed(None),
     }
 }
 
@@ -901,6 +979,7 @@ fn probe_foreground_process_from_jobs(
             agent: None,
             agent_pid: None,
             process_name: None,
+            foreground_command: foreground_command_in_job(job, pid),
         };
     }
 
@@ -910,6 +989,11 @@ fn probe_foreground_process_from_jobs(
         agent: None,
         agent_pid: None,
         process_name: None,
+        foreground_command: leader_job
+            .as_ref()
+            .map_or(ForegroundCommandProbe::Unobserved, |job| {
+                foreground_command_in_job(job, pid)
+            }),
     }
 }
 
@@ -965,6 +1049,7 @@ fn spawn_basic_detection_task(
         let mut agent_startup_grace_until = None;
         let mut pending_idle = PendingIdleConfirmation::default();
         let mut last_codex_prompt_ready = false;
+        let mut published_foreground_command = None;
         let mut last_self_reported_shell_check = None;
         let mut agent_job = AgentJobTracker::default();
 
@@ -1055,6 +1140,13 @@ fn spawn_basic_detection_task(
                 let had_process_probe = has_process_probe;
                 has_process_probe = true;
                 let probe = probe_foreground_process(pid, foreground_pgid);
+                publish_foreground_command_change(
+                    &state_events,
+                    pane_id,
+                    &mut published_foreground_command,
+                    probe.foreground_command.clone(),
+                )
+                .await;
                 let process_group_id = probe.process_group_id;
                 let tracked_process_group_id =
                     process_group_for_change_tracking(foreground_pgid, process_group_id);
@@ -2890,6 +2982,7 @@ impl PaneRuntime {
                 let mut agent_startup_grace_until = None;
                 let mut pending_idle = PendingIdleConfirmation::default();
                 let mut last_codex_prompt_ready = false;
+                let mut published_foreground_command = None;
                 let mut last_self_reported_shell_check = None;
                 let mut agent_job = AgentJobTracker::default();
 
@@ -3018,6 +3111,13 @@ impl PaneRuntime {
                         has_process_probe = true;
                         if pid > 0 {
                             let probe = probe_foreground_process(pid, foreground_pgid);
+                            publish_foreground_command_change(
+                                &state_events,
+                                pane_id,
+                                &mut published_foreground_command,
+                                probe.foreground_command.clone(),
+                            )
+                            .await;
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let tracked_process_group_id = process_group_for_change_tracking(
@@ -4464,6 +4564,46 @@ mod tests {
 
         for (key, value) in extra {
             assert_eq!(cmd.get_env(key), Some(OsStr::new(&value)));
+        }
+    }
+
+    #[test]
+    fn pane_launch_env_exports_the_managed_restore_key() {
+        let restore_key = crate::restore_command::RestoreKey::parse("rk_test").unwrap();
+        let mut cmd = CommandBuilder::new("shell");
+        apply_pane_launch_env(
+            &mut cmd,
+            &PaneLaunchEnv::default().with_identity(
+                "w1".into(),
+                "w1:t1".into(),
+                "w1:p1".into(),
+                restore_key,
+            ),
+        );
+
+        assert_eq!(
+            cmd.get_env(crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR),
+            Some(OsStr::new("rk_test"))
+        );
+    }
+
+    #[test]
+    fn pane_launch_env_drops_an_inherited_restore_key_without_managed_identity() {
+        for launch_env in [
+            PaneLaunchEnv::default(),
+            PaneLaunchEnv::default().without_pane_identity(),
+        ] {
+            let mut cmd = CommandBuilder::new("shell");
+            cmd.env(crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR, "outer");
+
+            apply_pane_launch_env(&mut cmd, &launch_env);
+
+            assert!(
+                cmd.get_env(crate::integration::HERDR_PANE_RESTORE_KEY_ENV_VAR)
+                    .is_none(),
+                "{launch_env:?} must not pass on another pane's restore key"
+            );
+            assert_eq!(launch_env.restore_key(), None);
         }
     }
 
@@ -6032,6 +6172,168 @@ mod tests {
 
         assert_eq!(result.agent, Some(Agent::Claude));
         assert_eq!(result.process_name.as_deref(), Some("claude"));
+    }
+
+    fn foreground_process_with_argv(
+        pid: u32,
+        name: &str,
+        argv: &[&str],
+    ) -> crate::platform::ForegroundProcess {
+        crate::platform::ForegroundProcess {
+            argv: Some(argv.iter().map(|arg| arg.to_string()).collect()),
+            ..foreground_process(pid, name)
+        }
+    }
+
+    fn observed_command(name: &str, argv: &[&str]) -> ForegroundCommandProbe {
+        ForegroundCommandProbe::Observed(Some(crate::restore_command::ForegroundCommand {
+            process_name: name.to_string(),
+            argv: Some(argv.iter().map(|arg| arg.to_string()).collect()),
+        }))
+    }
+
+    #[test]
+    fn foreground_command_in_job_is_none_while_the_shell_is_in_the_job() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![foreground_process_with_argv(42, "zsh", &["-zsh"])],
+        };
+
+        assert_eq!(
+            foreground_command_in_job(&job, 42),
+            ForegroundCommandProbe::Observed(None)
+        );
+    }
+
+    #[test]
+    fn foreground_command_in_job_reports_the_job_leader() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![
+                foreground_process_with_argv(100, "child", &["child"]),
+                foreground_process_with_argv(99, "hx", &["hx", "src/main.rs"]),
+            ],
+        };
+
+        assert_eq!(
+            foreground_command_in_job(&job, 42),
+            observed_command("hx", &["hx", "src/main.rs"])
+        );
+    }
+
+    #[test]
+    fn foreground_command_in_job_is_none_without_a_leader() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process_with_argv(100, "child", &["child"])],
+        };
+
+        assert_eq!(
+            foreground_command_in_job(&job, 42),
+            ForegroundCommandProbe::Observed(None)
+        );
+    }
+
+    #[test]
+    fn probe_reports_no_foreground_command_for_agent_jobs() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process_with_argv(99, "claude", &["claude"])],
+        };
+
+        let result = probe_foreground_process_from_jobs(42, Some(99), None, || Some(job), |_| None);
+
+        assert_eq!(result.agent, Some(Agent::Claude));
+        assert_eq!(
+            result.foreground_command,
+            ForegroundCommandProbe::Observed(None)
+        );
+    }
+
+    #[test]
+    fn probe_reports_the_leader_command_for_non_agent_jobs() {
+        let leader = foreground_process_with_argv(99, "hx", &["hx", "a.rs"]);
+        let leader_job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![leader.clone()],
+        };
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![leader],
+        };
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(99),
+            Some(leader_job),
+            || Some(job),
+            |_| None,
+        );
+
+        assert_eq!(result.agent, None);
+        assert_eq!(
+            result.foreground_command,
+            observed_command("hx", &["hx", "a.rs"])
+        );
+    }
+
+    #[test]
+    fn probe_without_any_job_leaves_the_foreground_command_unobserved() {
+        let result = probe_foreground_process_from_jobs(42, Some(99), None, || None, |_| None);
+
+        assert_eq!(
+            result.foreground_command,
+            ForegroundCommandProbe::Unobserved
+        );
+    }
+
+    #[test]
+    fn probe_falls_back_to_the_leader_job_for_the_foreground_command() {
+        let leader_job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process_with_argv(99, "hx", &["hx"])],
+        };
+
+        let result =
+            probe_foreground_process_from_jobs(42, Some(99), Some(leader_job), || None, |_| None);
+
+        assert_eq!(result.foreground_command, observed_command("hx", &["hx"]));
+    }
+
+    #[tokio::test]
+    async fn foreground_command_changes_publish_first_observation_and_changes_only() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let pane_id = PaneId::from_raw(7);
+        let mut published = None;
+        let hx = observed_command("hx", &["hx"]);
+
+        for probe in [
+            ForegroundCommandProbe::Unobserved,
+            ForegroundCommandProbe::Observed(None),
+            ForegroundCommandProbe::Observed(None),
+            ForegroundCommandProbe::Unobserved,
+            hx.clone(),
+            hx.clone(),
+            ForegroundCommandProbe::Observed(None),
+        ] {
+            publish_foreground_command_change(&tx, pane_id, &mut published, probe).await;
+        }
+        drop(tx);
+
+        let mut commands = Vec::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                AppEvent::ForegroundCommandChanged {
+                    pane_id: event_pane,
+                    command,
+                } => {
+                    assert_eq!(event_pane, pane_id);
+                    commands.push(command.map(|command| command.process_name));
+                }
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+        assert_eq!(commands, vec![None, Some("hx".to_string()), None]);
     }
 
     fn process_probe_input() -> ProcessProbeInput {

@@ -827,6 +827,9 @@ pub struct AppState {
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
+    /// Programs whose command lines are saved for restore, from
+    /// `[session] restore_commands`.
+    pub restore_commands: Vec<crate::restore_command::RestoreCommandName>,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub next_agent_state_change_seq: u64,
     pub confirm_close: bool,
@@ -1070,6 +1073,7 @@ impl AppState {
             agent_panel_sort: AgentPanelSort::Spaces,
             agent_view_override: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
+            restore_commands: Vec::new(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             next_agent_state_change_seq: 0,
             confirm_close: true,

@@ -111,6 +111,10 @@ pub struct PaneSnapshot {
     pub agent_resume: Option<PaneAgentResumeSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -395,6 +399,10 @@ fn capture_tab(
                 agent_session,
                 agent_resume,
                 launch_argv,
+                restore_key: terminal.map(|terminal| terminal.restore_key.as_str().to_string()),
+                restore_command: terminal
+                    .and_then(|terminal| terminal.restore_command())
+                    .map(<[String]>::to_vec),
             },
         );
     }
@@ -715,6 +723,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                restore_key: None,
+                restore_command: None,
             },
         );
         panes.insert(
@@ -727,6 +737,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                restore_key: None,
+                restore_command: None,
             },
         );
 
@@ -812,6 +824,21 @@ mod tests {
         assert_eq!(snap.sidebar_section_split, Some(0.4));
         assert_eq!(snap.workspaces[0].active_tab, 1);
         assert_eq!(snap.workspaces[1].tabs[0].panes.len(), 2);
+    }
+
+    #[test]
+    fn snapshot_without_restore_fields_parses_them_as_absent() {
+        let snap = parse_snapshot(session_fixture("current-herdr-dev")).unwrap();
+
+        for pane in snap
+            .workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.tabs)
+            .flat_map(|tab| tab.panes.values())
+        {
+            assert_eq!(pane.restore_key, None);
+            assert_eq!(pane.restore_command, None);
+        }
     }
 
     #[test]
@@ -1348,6 +1375,35 @@ mod tests {
     }
 
     #[test]
+    fn capture_contract_includes_restore_key_and_command() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_restore_command(Some(vec!["hx".into(), "a.rs".into()]));
+        let restore_key = terminal.restore_key.as_str().to_string();
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        assert_eq!(pane.restore_key.as_deref(), Some(restore_key.as_str()));
+        assert_eq!(
+            pane.restore_command.as_deref(),
+            Some(["hx".to_string(), "a.rs".to_string()].as_slice())
+        );
+
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+        let pane = &restored.workspaces[0].tabs[0].panes[&root.raw()];
+        assert_eq!(pane.restore_key.as_deref(), Some(restore_key.as_str()));
+        assert_eq!(
+            pane.restore_command.as_deref(),
+            Some(["hx".to_string(), "a.rs".to_string()].as_slice())
+        );
+    }
+
+    #[test]
     fn capture_contract_preserves_restored_agent_session() {
         let mut state = state_with_workspaces(&["one"]);
         let root = state.workspaces[0].tabs[0].root_pane;
@@ -1413,6 +1469,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                restore_key: None,
+                restore_command: None,
             },
         );
         panes.insert(
@@ -1427,6 +1485,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                restore_key: None,
+                restore_command: None,
             },
         );
 

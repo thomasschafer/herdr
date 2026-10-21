@@ -47,12 +47,19 @@ impl App {
         let ws = self.state.workspaces.get(ws_idx)?;
         let tab_idx = ws.find_tab_index_for_pane(pane_id)?;
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
+        let restore_key = self
+            .state
+            .terminals
+            .get(&ws.pane_state(pane_id)?.attached_terminal_id)?
+            .restore_key
+            .clone();
         let pane_id = self.public_pane_id(ws_idx, pane_id)?;
         Some(
             crate::pane::PaneLaunchEnv::from_extra(extra_env).with_identity(
                 workspace_id,
                 tab_id,
                 pane_id,
+                restore_key,
             ),
         )
     }
@@ -177,5 +184,31 @@ mod tests {
             assert_eq!(app.parse_workspace_id(id), None, "{id}");
         }
         assert_eq!(app.parse_tab_id("2:1"), None);
+    }
+    #[test]
+    fn pane_launch_env_exports_the_terminal_restore_key() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("only")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+
+        let launch_env = app
+            .pane_launch_env(0, pane_id, Vec::new())
+            .expect("pane launch env");
+
+        assert_eq!(
+            launch_env.restore_key(),
+            Some(&app.state.terminals[&terminal_id].restore_key)
+        );
     }
 }

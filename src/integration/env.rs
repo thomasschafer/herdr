@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use portable_pty::CommandBuilder;
 
 pub(crate) const HERDR_PANE_ID_ENV_VAR: &str = "HERDR_PANE_ID";
+pub(crate) const HERDR_PANE_RESTORE_KEY_ENV_VAR: &str = "HERDR_PANE_RESTORE_KEY";
 pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
 pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
 

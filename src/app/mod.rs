@@ -436,7 +436,10 @@ impl App {
                 config.advanced.scrollback_limit_bytes,
                 &config.terminal.default_shell,
                 config.terminal.shell_mode,
-                config.session.resume_agents_on_restore,
+                crate::persist::RestorePolicy {
+                    resume_agents: config.session.resume_agents_on_restore,
+                    restore_commands: &config.session.restore_commands,
+                },
                 event_tx.clone(),
                 render_notify.clone(),
                 render_dirty.clone(),
@@ -532,6 +535,7 @@ impl App {
             agent_panel_sort,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
+            restore_commands: config.session.restore_commands.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
@@ -919,6 +923,10 @@ impl App {
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
             }
+        }
+
+        if !invalid_section("session") {
+            self.state.restore_commands = config.session.restore_commands.clone();
         }
 
         if !invalid_section("session")
@@ -1858,6 +1866,28 @@ mod tests {
         let report = app.apply_live_config(&config, &[], &["session".into()], false);
         assert!(report.diagnostics.is_empty());
         assert_eq!(app.startup_per_agent_delay, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn reload_config_applies_restore_commands_unless_session_is_invalid() {
+        let mut app = test_app();
+        let mut config = Config::default();
+        config.session.restore_commands =
+            vec![crate::restore_command::RestoreCommandName::try_from("hx".to_string()).unwrap()];
+
+        let report = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.restore_commands, config.session.restore_commands);
+
+        let report = app.apply_live_config(&Config::default(), &[], &["session".into()], false);
+        assert!(report.diagnostics.is_empty());
+        assert_eq!(
+            app.state.restore_commands, config.session.restore_commands,
+            "an invalid [session] section must keep the current allowlist"
+        );
+
+        app.apply_live_config(&Config::default(), &[], &[], false);
+        assert!(app.state.restore_commands.is_empty());
     }
 
     #[test]

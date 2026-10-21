@@ -1531,6 +1531,20 @@ impl AppState {
                 })
                 .into_iter()
                 .collect(),
+            AppEvent::ForegroundCommandChanged { pane_id, command } => {
+                let argv = command.and_then(|command| {
+                    crate::restore_command::restorable_argv(&command, &self.restore_commands)
+                });
+                let mut changed = false;
+                self.update_terminal_state(pane_id, |terminal| {
+                    changed = terminal.set_restore_command(argv);
+                    None
+                });
+                if changed {
+                    self.session_dirty = true;
+                }
+                Vec::new()
+            }
             AppEvent::ReportedAgentShellReturned {
                 pane_id,
                 observed_at,
@@ -3840,6 +3854,77 @@ mod tests {
             state.terminals[&terminal_id].reported_resume().is_none(),
             "a late report must not revive an exited agent"
         );
+    }
+
+    fn observe_foreground(state: &mut AppState, pane_id: PaneId, process: Option<(&str, &[&str])>) {
+        state.handle_app_event(AppEvent::ForegroundCommandChanged {
+            pane_id,
+            command: process.map(|(process_name, argv)| {
+                crate::restore_command::ForegroundCommand {
+                    process_name: process_name.into(),
+                    argv: Some(argv.iter().map(|arg| arg.to_string()).collect()),
+                }
+            }),
+        });
+    }
+
+    fn restore_commands(names: &[&str]) -> Vec<crate::restore_command::RestoreCommandName> {
+        names
+            .iter()
+            .map(|name| {
+                crate::restore_command::RestoreCommandName::try_from(name.to_string()).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn foreground_command_of_allowlisted_program_is_saved_until_the_shell_returns() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.restore_commands = restore_commands(&["hx"]);
+        let (pane_id, terminal_id) = first_pane_terminal(&state);
+        state.session_dirty = false;
+
+        observe_foreground(&mut state, pane_id, Some(("hx", &["/bin/hx", "a.rs"])));
+        assert_eq!(
+            state.terminals[&terminal_id].restore_command(),
+            Some(["hx".to_string(), "a.rs".to_string()].as_slice())
+        );
+        assert!(state.session_dirty);
+
+        state.session_dirty = false;
+        observe_foreground(&mut state, pane_id, Some(("hx", &["/bin/hx", "a.rs"])));
+        assert!(!state.session_dirty, "an unchanged command needs no save");
+
+        observe_foreground(&mut state, pane_id, None);
+        assert_eq!(state.terminals[&terminal_id].restore_command(), None);
+        assert!(state.session_dirty);
+    }
+
+    #[test]
+    fn foreground_command_outside_the_allowlist_is_not_saved() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.restore_commands = restore_commands(&["hx"]);
+        let (pane_id, terminal_id) = first_pane_terminal(&state);
+        state.session_dirty = false;
+
+        observe_foreground(&mut state, pane_id, Some(("cargo", &["cargo", "build"])));
+
+        assert_eq!(state.terminals[&terminal_id].restore_command(), None);
+        assert!(!state.session_dirty);
+    }
+
+    #[test]
+    fn foreground_program_leaving_the_allowlist_clears_its_saved_command() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.restore_commands = restore_commands(&["hx"]);
+        let (pane_id, terminal_id) = first_pane_terminal(&state);
+        observe_foreground(&mut state, pane_id, Some(("hx", &["hx"])));
+        state.session_dirty = false;
+
+        observe_foreground(&mut state, pane_id, Some(("less", &["less", "log"])));
+
+        assert_eq!(state.terminals[&terminal_id].restore_command(), None);
+        assert!(state.session_dirty);
     }
 
     #[test]

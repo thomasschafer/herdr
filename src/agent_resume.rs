@@ -77,15 +77,18 @@ pub fn validate_resume_argv(argv: &[String]) -> Result<(), String> {
     if argv.iter().any(|arg| arg.contains('\'')) {
         return Err("resume_argv must not contain apostrophes".into());
     }
-    let plain_command = !command.is_empty()
-        && !command.starts_with('-')
-        && command
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'));
-    if !plain_command {
+    if !is_plain_command_name(command) {
         return Err("resume_argv must start with a plain command name, not a path".into());
     }
     Ok(())
+}
+
+pub(crate) fn is_plain_command_name(command: &str) -> bool {
+    !command.is_empty()
+        && !command.starts_with('-')
+        && command
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

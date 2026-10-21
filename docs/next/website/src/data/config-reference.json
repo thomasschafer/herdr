@@ -1471,6 +1471,12 @@
           "type": "integer",
           "default": "100",
           "description": "Milliseconds between automatic agent restores after a server restart. The first agent starts without this delay; 0 disables spacing. Does not delay manual launches or explicit terminal attaches. Restart the server to apply."
+        },
+        {
+          "key": "session.restore_commands",
+          "type": "array",
+          "default": "[]",
+          "description": "Plain command names of programs, such as editors, to start again with the same arguments in their pane after a server restart. Panes also get HERDR_PANE_RESTORE_KEY, which stays the same across restarts so these programs can restore their own state."
         }
       ]
     },

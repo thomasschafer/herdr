@@ -49,6 +49,7 @@ mod release_notes;
 mod remote;
 mod render_prof;
 mod render_signal;
+mod restore_command;
 mod selection;
 mod server;
 mod session;
@@ -414,6 +415,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resume_agents_on_restore = true
 # Milliseconds between automatic agent restores; 0 starts them without spacing.
 # startup_per_agent_delay_ms = 100
+# Programs to start again with the same arguments in their pane after a Herdr
+# server restart, such as editors. Panes also get HERDR_PANE_RESTORE_KEY, which
+# stays the same across restarts so these programs can restore their own state.
+# restore_commands = ["hx"]
 
 [remote]
 # Whether herdr manages the ssh config used for `herdr --remote`.

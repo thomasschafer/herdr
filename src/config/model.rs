@@ -270,6 +270,9 @@ pub struct SessionConfig {
     pub resume_agents_on_restore: bool,
     /// Milliseconds between automatic agent restores. Zero disables spacing.
     pub startup_per_agent_delay_ms: u32,
+    /// Programs, such as editors, to start again with the same arguments in
+    /// their pane when restoring a Herdr session. Default: none.
+    pub restore_commands: Vec<crate::restore_command::RestoreCommandName>,
 }
 
 impl Default for SessionConfig {
@@ -277,6 +280,7 @@ impl Default for SessionConfig {
         Self {
             resume_agents_on_restore: true,
             startup_per_agent_delay_ms: 100,
+            restore_commands: Vec::new(),
         }
     }
 }
@@ -1498,6 +1502,35 @@ startup_per_agent_delay_ms = 0
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.session.resume_agents_on_restore);
         assert_eq!(config.session.startup_per_agent_delay_ms, 0);
+    }
+
+    #[test]
+    fn restore_commands_default_empty_and_reject_paths() {
+        assert!(Config::default().session.restore_commands.is_empty());
+
+        let config: Config = toml::from_str(
+            r#"
+[session]
+restore_commands = ["hx", "nvim"]
+"#,
+        )
+        .unwrap();
+        let names: Vec<&str> = config
+            .session
+            .restore_commands
+            .iter()
+            .map(|name| name.as_str())
+            .collect();
+        assert_eq!(names, ["hx", "nvim"]);
+
+        let err = toml::from_str::<Config>(
+            r#"
+[session]
+restore_commands = ["/usr/local/bin/hx"]
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("plain command names"), "{err}");
     }
 
     #[test]

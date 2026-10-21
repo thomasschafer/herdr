@@ -35,6 +35,15 @@ enum SplitCommand<'a> {
     },
 }
 
+/// The terminal keeps the key its process was launched with, so later
+/// launches in the pane and saved sessions export the same value.
+fn with_launch_restore_key(terminal: TerminalState, launch_env: &PaneLaunchEnv) -> TerminalState {
+    match launch_env.restore_key() {
+        Some(restore_key) => terminal.with_restore_key(restore_key.clone()),
+        None => terminal,
+    }
+}
+
 pub struct Tab {
     pub custom_name: Option<String>,
     pub number: usize,
@@ -169,12 +178,14 @@ impl Tab {
         };
 
         let terminal_id = TerminalId::alloc();
-        let terminal = match argv {
-            Some(argv) => {
-                TerminalState::new(terminal_id.clone(), initial_cwd).with_launch_argv(argv.to_vec())
-            }
-            None => TerminalState::new(terminal_id.clone(), initial_cwd),
-        };
+        let terminal = with_launch_restore_key(
+            match argv {
+                Some(argv) => TerminalState::new(terminal_id.clone(), initial_cwd)
+                    .with_launch_argv(argv.to_vec()),
+                None => TerminalState::new(terminal_id.clone(), initial_cwd),
+            },
+            launch_env,
+        );
         let mut panes = HashMap::new();
         panes.insert(root_id, PaneState::new(terminal_id));
 
@@ -399,12 +410,15 @@ impl Tab {
             }
         };
         let terminal_id = TerminalId::alloc();
-        let terminal = match launch_argv {
-            Some(argv) => {
-                TerminalState::new(terminal_id.clone(), actual_cwd).with_launch_argv(argv)
-            }
-            None => TerminalState::new(terminal_id.clone(), actual_cwd),
-        };
+        let terminal = with_launch_restore_key(
+            match launch_argv {
+                Some(argv) => {
+                    TerminalState::new(terminal_id.clone(), actual_cwd).with_launch_argv(argv)
+                }
+                None => TerminalState::new(terminal_id.clone(), actual_cwd),
+            },
+            launch_env,
+        );
         if focus_new_pane {
             self.layout.focus_pane(new_id);
         }
