@@ -119,6 +119,16 @@ pub fn osc_set_default_color_sequence(kind: DefaultColorKind, color: RgbColor) -
         DefaultColorKind::Foreground => 10,
         DefaultColorKind::Background => 11,
     };
+    osc_set_color_sequence(command, color)
+}
+
+pub fn osc_set_cursor_color_sequence(color: RgbColor) -> String {
+    osc_set_color_sequence(12, color)
+}
+
+pub const OSC_RESET_CURSOR_COLOR_SEQUENCE: &str = "\x1b]112\x1b\\";
+
+fn osc_set_color_sequence(command: u8, color: RgbColor) -> String {
     format!(
         "\x1b]{command};rgb:{:02x}/{:02x}/{:02x}\x1b\\",
         color.r, color.g, color.b

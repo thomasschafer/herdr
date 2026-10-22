@@ -352,6 +352,10 @@ impl TerminalRuntime {
         self.0.cursor_state(area, show_cursor)
     }
 
+    pub fn cursor_color(&self) -> Option<crate::terminal_theme::RgbColor> {
+        self.0.cursor_color()
+    }
+
     pub fn synchronized_output_active(&self) -> bool {
         self.0.synchronized_output_active()
     }

@@ -10,6 +10,7 @@ pub(crate) enum EndpointControlMessage {
     HealthPong,
     AgentViewProjection(DecodedAgentViewProjection),
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
+    CursorColor(crate::protocol::endpoint::EndpointCursorColor),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
     Ignored,
 }
@@ -25,6 +26,15 @@ pub(crate) fn decode_endpoint_control(
         return Ok(serde_json::from_str(data)
             .map(EndpointControlMessage::AgentCompletions)
             .unwrap_or(EndpointControlMessage::Ignored));
+    }
+    if kind == crate::protocol::endpoint::CURSOR_COLOR_KIND {
+        return Ok(match serde_json::from_str(data) {
+            Ok(cursor_color) => EndpointControlMessage::CursorColor(cursor_color),
+            Err(error) => {
+                tracing::warn!(%error, "ignoring invalid endpoint cursor color");
+                EndpointControlMessage::Ignored
+            }
+        });
     }
     if kind == crate::protocol::endpoint::AGENT_VIEW_PROJECTION_KIND {
         let Ok(projection): Result<crate::protocol::endpoint::EndpointAgentViewProjection, _> =
@@ -103,6 +113,47 @@ mod tests {
         assert_eq!(decoded, projection);
         assert!(matches!(
             decode_endpoint_control(&kind, "invalid").unwrap(),
+            EndpointControlMessage::Ignored
+        ));
+    }
+
+    #[test]
+    fn cursor_color_optional_control_round_trips() {
+        for color in [
+            Some(crate::protocol::ClientHostColor {
+                r: 0xf5,
+                g: 0xa9,
+                b: 0x7f,
+            }),
+            None,
+        ] {
+            let cursor_color = crate::protocol::endpoint::EndpointCursorColor {
+                boot_id: "boot".into(),
+                color,
+            };
+            let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+                crate::protocol::endpoint::cursor_color_message(&cursor_color).unwrap()
+            else {
+                panic!("expected optional control");
+            };
+            let EndpointControlMessage::CursorColor(decoded) =
+                decode_endpoint_control(&kind, &data).unwrap()
+            else {
+                panic!("expected cursor color");
+            };
+            assert_eq!(decoded, cursor_color);
+        }
+        let EndpointControlMessage::CursorColor(decoded) = decode_endpoint_control(
+            crate::protocol::endpoint::CURSOR_COLOR_KIND,
+            r#"{"boot_id":"boot","future":true}"#,
+        )
+        .unwrap() else {
+            panic!("expected cursor color");
+        };
+        assert_eq!(decoded.color, None);
+        assert!(matches!(
+            decode_endpoint_control(crate::protocol::endpoint::CURSOR_COLOR_KIND, "invalid")
+                .unwrap(),
             EndpointControlMessage::Ignored
         ));
     }

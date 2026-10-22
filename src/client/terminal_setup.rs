@@ -19,7 +19,7 @@ use crossterm::event::{PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags
 use crossterm::execute;
 use crossterm::terminal::{DisableLineWrap, EnableLineWrap};
 
-use super::frame_output::clear_received_kitty_graphics;
+use super::frame_output::{clear_received_kitty_graphics, reset_host_cursor_color};
 
 // ---------------------------------------------------------------------------
 // Terminal setup / restore
@@ -687,6 +687,7 @@ fn restore_terminal_state(
     #[cfg(windows)] restore_windows_input_mode: Option<u32>,
 ) -> io::Result<()> {
     let _ = clear_received_kitty_graphics(&mut io::stdout());
+    let _ = reset_host_cursor_color(&mut io::stdout());
 
     // Reset modifyOtherKeys if we enabled it.
     if reset_modify_other_keys {

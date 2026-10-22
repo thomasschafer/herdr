@@ -122,7 +122,10 @@ use clipboard_images::{read_image_file_from_client_events, should_bridge_clipboa
 use clipboard_images::{read_image_file_from_terminal_drop, should_bridge_clipboard_image_paste};
 pub use errors::ClientError;
 #[cfg(test)]
-use frame_output::{clear_received_kitty_graphics, kitty_graphics_image_ids};
+use frame_output::{
+    clear_received_kitty_graphics, kitty_graphics_image_ids, reset_host_cursor_color,
+    write_host_cursor_color,
+};
 use frame_output::{
     contains_kitty_graphics_bytes, record_received_kitty_graphics,
     write_encoded_frame_with_graphics,
@@ -490,6 +493,7 @@ async fn run_client_loop(
         presentation_frozen: false,
         deferred_local_activation: None,
         draw_host_cursor,
+        host_cursor_color: None,
         detached_process_children: Vec::new(),
         shell: config.shell_config.map(shell::ClientShellState::new),
     };
@@ -2133,6 +2137,23 @@ async fn run_client_loop(
                                         generation,
                                         projection,
                                     );
+                                }
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::CursorColor(cursor_color)) => {
+                                let size = state.reported_size;
+                                let frame = state.shell.as_mut().and_then(|shell| {
+                                    shell
+                                        .set_endpoint_cursor_color(
+                                            &endpoint_id,
+                                            generation,
+                                            cursor_color,
+                                        )
+                                        .then(|| shell.compose(size.0, size.1))
+                                        .flatten()
+                                });
+                                if let Some(frame) = frame {
+                                    state.present_frame(frame);
                                 }
                                 continue;
                             }

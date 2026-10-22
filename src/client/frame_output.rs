@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::{self, Write as _};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::kitty_graphics::{GraphicsOperation, GraphicsOutput};
@@ -11,12 +12,18 @@ use base64::Engine as _;
 pub(crate) struct ComposedFrame {
     pub(crate) frame: FrameData,
     pub(crate) graphics: GraphicsOutput,
+    /// Host cursor color for the frame's cursor; `None` uses the host terminal's default.
+    pub(crate) cursor_color: Option<crate::terminal_theme::RgbColor>,
 }
 
 impl From<FrameData> for ComposedFrame {
     fn from(mut frame: FrameData) -> Self {
         let graphics = GraphicsOutput::from_bytes(std::mem::take(&mut frame.graphics));
-        Self { frame, graphics }
+        Self {
+            frame,
+            graphics,
+            cursor_color: None,
+        }
     }
 }
 
@@ -29,6 +36,8 @@ impl std::ops::Deref for ComposedFrame {
 }
 
 static RECEIVED_KITTY_GRAPHICS_IDS: OnceLock<Mutex<HashSet<u32>>> = OnceLock::new();
+/// Whether the host cursor may hold a color this process set, which terminal restore resets.
+static HOST_CURSOR_COLOR_SET: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn write_composed_frame(
     mut writer: impl io::Write,
@@ -98,6 +107,37 @@ pub(super) fn write_encoded_frame_with_graphics(
     writer.write_all(graphics)?;
     writer.write_all(b"\x1b8")?;
     writer.write_all(&encoded[insertion..])
+}
+
+/// Moves the host cursor color from `current` to `next`; `None` is the host's default.
+pub(super) fn write_host_cursor_color(
+    mut writer: impl io::Write,
+    current: Option<crate::terminal_theme::RgbColor>,
+    next: Option<crate::terminal_theme::RgbColor>,
+) -> io::Result<()> {
+    if current == next {
+        return Ok(());
+    }
+    match next {
+        Some(color) => {
+            // Record before writing so a partial write is still reset on exit.
+            HOST_CURSOR_COLOR_SET.store(true, Ordering::Release);
+            writer.write_all(crate::terminal_theme::osc_set_cursor_color_sequence(color).as_bytes())
+        }
+        None => {
+            writer.write_all(crate::terminal_theme::OSC_RESET_CURSOR_COLOR_SEQUENCE.as_bytes())?;
+            HOST_CURSOR_COLOR_SET.store(false, Ordering::Release);
+            Ok(())
+        }
+    }
+}
+
+pub(super) fn reset_host_cursor_color(mut writer: impl io::Write) -> io::Result<()> {
+    if !HOST_CURSOR_COLOR_SET.swap(false, Ordering::AcqRel) {
+        return Ok(());
+    }
+    writer.write_all(crate::terminal_theme::OSC_RESET_CURSOR_COLOR_SEQUENCE.as_bytes())?;
+    writer.flush()
 }
 
 pub(super) fn contains_kitty_graphics_bytes(bytes: &[u8]) -> bool {

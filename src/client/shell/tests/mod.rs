@@ -321,6 +321,7 @@ mod chrome_context;
 mod close_pane;
 mod close_tab;
 mod copy;
+mod cursor_color;
 mod endpoint_requests;
 mod endpoints;
 mod graphics;

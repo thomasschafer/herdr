@@ -483,6 +483,10 @@ impl PaneTerminal {
         self.ghostty.cursor_state()
     }
 
+    pub fn cursor_color(&self) -> Option<crate::terminal_theme::RgbColor> {
+        self.ghostty.cursor_color()
+    }
+
     pub fn synchronized_output_active(&self) -> bool {
         self.ghostty.synchronized_output_active()
     }
@@ -2003,6 +2007,17 @@ impl GhosttyPaneTerminal {
         let mut core = self.core.lock().ok()?;
         let current = current_cursor_state(&mut core);
         effective_cursor_state(&mut core, current)
+    }
+
+    /// The child's cursor color override (OSC 12), or `None` when it uses the default.
+    pub fn cursor_color(&self) -> Option<crate::terminal_theme::RgbColor> {
+        let core = self.core.lock().ok()?;
+        let color = core.terminal.effective_cursor_color().ok().flatten()?;
+        Some(crate::terminal_theme::RgbColor {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+        })
     }
 
     pub fn synchronized_output_active(&self) -> bool {

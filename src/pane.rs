@@ -3598,6 +3598,10 @@ impl PaneRuntime {
         })
     }
 
+    pub fn cursor_color(&self) -> Option<crate::terminal_theme::RgbColor> {
+        self.terminal.cursor_color()
+    }
+
     pub fn synchronized_output_active(&self) -> bool {
         self.terminal.synchronized_output_active()
     }

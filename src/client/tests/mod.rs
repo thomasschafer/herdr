@@ -388,6 +388,36 @@ fn kitty_graphics_cleanup_deletes_tracked_images_not_all_images() {
 }
 
 #[test]
+fn terminal_restore_resets_only_a_cursor_color_herdr_set() {
+    let orange = crate::terminal_theme::RgbColor {
+        r: 0xf5,
+        g: 0xa9,
+        b: 0x7f,
+    };
+    let mut output = Vec::new();
+    reset_host_cursor_color(&mut output).unwrap();
+    assert!(output.is_empty(), "a color herdr never set is left alone");
+
+    write_host_cursor_color(&mut output, None, Some(orange)).unwrap();
+    assert_eq!(output, b"\x1b]12;rgb:f5/a9/7f\x1b\\");
+    output.clear();
+    write_host_cursor_color(&mut output, Some(orange), Some(orange)).unwrap();
+    assert!(output.is_empty());
+    reset_host_cursor_color(&mut output).unwrap();
+    assert_eq!(output, b"\x1b]112\x1b\\");
+
+    output.clear();
+    write_host_cursor_color(&mut output, None, Some(orange)).unwrap();
+    write_host_cursor_color(&mut output, Some(orange), None).unwrap();
+    output.clear();
+    reset_host_cursor_color(&mut output).unwrap();
+    assert!(
+        output.is_empty(),
+        "an already reset color is not reset again"
+    );
+}
+
+#[test]
 fn write_host_terminal_appearance_query_emits_mode_2031_query() {
     let mut output = Vec::new();
     write_host_terminal_appearance_query(&mut output).unwrap();

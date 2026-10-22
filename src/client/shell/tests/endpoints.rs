@@ -456,6 +456,33 @@ fn active_retry_failure_preserves_diagnostic_and_presentation_freeze() {
 }
 
 #[test]
+fn inactive_endpoint_cursor_colors_apply_once_selected() {
+    let (mut state, remote) = state_with_remote();
+    let orange = crate::terminal_theme::RgbColor {
+        r: 0xf5,
+        g: 0xa9,
+        b: 0x7f,
+    };
+    assert!(
+        !state.set_endpoint_cursor_color(
+            &remote,
+            7,
+            crate::protocol::endpoint::EndpointCursorColor {
+                boot_id: "remote-boot".into(),
+                color: Some(orange.into()),
+            },
+        ),
+        "an inactive endpoint's color does not repaint the active surface"
+    );
+    assert_eq!(state.active_endpoint_cursor_color(), None);
+
+    assert!(state.activate_endpoint_projection(&remote));
+    assert_eq!(state.active_endpoint_cursor_color(), Some(orange));
+    state.retire_endpoint(&remote);
+    assert_eq!(state.active_endpoint_cursor_color(), None);
+}
+
+#[test]
 fn selecting_a_reconnecting_machine_retries_it() {
     for active in [false, true] {
         let (mut state, id) = state_with_remote();

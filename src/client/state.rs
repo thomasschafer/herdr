@@ -78,6 +78,8 @@ pub(super) struct ClientState {
     /// Latest explicit Local selection awaiting this client's replacement Local connection.
     pub(super) deferred_local_activation: Option<endpoint::EndpointActivationIntent>,
     pub(super) draw_host_cursor: bool,
+    /// Cursor color this client last set on the host terminal; `None` is the host default.
+    pub(super) host_cursor_color: Option<crate::terminal_theme::RgbColor>,
     pub(super) detached_process_children: Vec<std::process::Child>,
     pub(super) shell: Option<shell::ClientShellState>,
 }
@@ -139,6 +141,7 @@ impl ClientState {
             presentation_frozen: false,
             deferred_local_activation: None,
             draw_host_cursor: false,
+            host_cursor_color: None,
             detached_process_children: Vec::new(),
             shell: Some(shell::ClientShellState::new(
                 shell::ClientShellConfig::from_config(&crate::config::Config::default()),
@@ -564,6 +567,7 @@ impl ClientState {
         let frame_output::ComposedFrame {
             frame: mut frame_data,
             graphics,
+            cursor_color,
         } = frame_data.into();
         // With capture enabled, host OSC 8 can intercept Ctrl-click before plugins.
         // Keep semantic links internally and restore native links when capture is off.
@@ -581,12 +585,21 @@ impl ClientState {
         } else {
             self.blit_encoder.encode(&frame_data, self.repaint_pending)
         };
-        if let Err(error) = self.write_composed_output(writer, &encoded.bytes, graphics) {
+        // A drawn cursor is a cell style, so the host cursor keeps its default color.
+        let cursor_color = cursor_color.filter(|_| !self.draw_host_cursor);
+        let written = frame_output::write_host_cursor_color(
+            &mut *writer,
+            self.host_cursor_color,
+            cursor_color,
+        )
+        .and_then(|()| self.write_composed_output(writer, &encoded.bytes, graphics));
+        if let Err(error) = written {
             tracing::warn!(%error, "failed to present client frame");
             self.repaint_pending = true;
             return false;
         }
         self.blit_encoder.commit(frame_data, encoded);
+        self.host_cursor_color = cursor_color;
         self.repaint_pending = false;
         true
     }

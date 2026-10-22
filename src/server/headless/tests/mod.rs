@@ -6358,6 +6358,90 @@ fn client_shell_streams_focused_pane_report_all_demand() {
     });
 }
 
+#[test]
+fn client_shell_streams_focused_pane_cursor_color_changes() {
+    with_terminal_session_test_server(|server, _other_terminal_id, terminal_id, _pane_id| {
+        let (client_tx, client_control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        server.app.state.active = Some(0);
+        let write_pane = |server: &mut HeadlessServer, bytes: &[u8]| {
+            server
+                .runtime_for_terminal_id_string(&terminal_id)
+                .expect("focused runtime")
+                .test_process_pty_bytes(bytes);
+            server.stream_host_cursor_color();
+        };
+        let next_color = || {
+            let message = read_server_message(
+                client_control_rx
+                    .recv_timeout(Duration::from_millis(100))
+                    .expect("cursor color message"),
+            );
+            let ServerMessage::EndpointControl { kind, data } = message else {
+                panic!("expected cursor color control, got {message:?}");
+            };
+            assert_eq!(kind, protocol::endpoint::CURSOR_COLOR_KIND);
+            serde_json::from_str::<protocol::endpoint::EndpointCursorColor>(&data).unwrap()
+        };
+        let orange = protocol::ClientHostColor {
+            r: 0xf5,
+            g: 0xa9,
+            b: 0x7f,
+        };
+        let blue = protocol::ClientHostColor {
+            r: 0x8a,
+            g: 0xad,
+            b: 0xf4,
+        };
+
+        server.stream_host_cursor_color();
+        assert!(
+            client_control_rx.try_recv().is_err(),
+            "a new client already assumes the default color"
+        );
+
+        write_pane(server, b"\x1b]12;#f5a97f\x07");
+        let reported = next_color();
+        assert_eq!(reported.boot_id, server.client_shell_boot_id);
+        assert_eq!(reported.color, Some(orange));
+        server.stream_host_cursor_color();
+        assert!(
+            client_control_rx.try_recv().is_err(),
+            "unchanged colors are not resent"
+        );
+
+        write_pane(server, b"\x1b[?2026h\x1b]12;rgb:8a/ad/f4\x1b\\");
+        assert!(
+            client_control_rx.try_recv().is_err(),
+            "a synchronized update holds the color with the frame"
+        );
+        write_pane(server, b"\x1b[?2026l");
+        assert_eq!(next_color().color, Some(blue));
+
+        write_pane(server, b"\x1b]112\x07");
+        assert_eq!(next_color().color, None);
+
+        write_pane(server, b"\x1b]12;#f5a97f\x07");
+        assert_eq!(next_color().color, Some(orange));
+        server.clients.get_mut(&1).unwrap().shell_surface_active = false;
+        server.stream_host_cursor_color();
+        assert_eq!(
+            next_color().color,
+            None,
+            "a connection without an active surface shows no pane cursor"
+        );
+    });
+}
+
 #[tokio::test]
 async fn client_shell_release_cleanup_does_not_promote_and_survives_disconnect() {
     let mut server = test_headless_server();

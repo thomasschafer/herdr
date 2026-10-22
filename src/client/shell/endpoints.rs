@@ -22,6 +22,15 @@ pub(crate) struct ClientShellEndpoint {
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
+    cursor_color: Option<EndpointCursorColorState>,
+}
+
+/// The last cursor color an endpoint connection reported for its surface cursor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EndpointCursorColorState {
+    generation: u64,
+    boot_id: String,
+    color: Option<crate::terminal_theme::RgbColor>,
 }
 
 pub(super) struct MachineHit {
@@ -88,6 +97,7 @@ impl ClientShellState {
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                cursor_color: previous.and_then(|endpoint| endpoint.cursor_color.clone()),
             });
         }
 
@@ -133,6 +143,7 @@ impl ClientShellState {
             endpoint.agent_view_projection = None;
             endpoint.pending_agent_view_projection = None;
             endpoint.agent_view_projection_supported = false;
+            endpoint.cursor_color = None;
         }
     }
 
@@ -337,6 +348,48 @@ impl ClientShellState {
                 .agent_presentation
                 .receive_completions(Some(generation), projection);
         }
+    }
+
+    /// Records an endpoint's cursor color and returns whether the active endpoint's resolved
+    /// color changed, in which case the host cursor needs repainting.
+    pub(crate) fn set_endpoint_cursor_color(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        generation: u64,
+        cursor_color: crate::protocol::endpoint::EndpointCursorColor,
+    ) -> bool {
+        let before = self.active_endpoint_cursor_color();
+        let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        else {
+            return false;
+        };
+        endpoint.cursor_color = Some(EndpointCursorColorState {
+            generation,
+            boot_id: cursor_color.boot_id,
+            color: cursor_color.color.map(Into::into),
+        });
+        self.active_endpoint_cursor_color() != before
+    }
+
+    /// The cursor color reported by the active endpoint's current connection and server boot.
+    /// A color left over from an earlier connection or boot is never applied: a new connection
+    /// only reports a color once it differs from the default.
+    pub(crate) fn active_endpoint_cursor_color(&self) -> Option<crate::terminal_theme::RgbColor> {
+        let endpoint = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .filter(|endpoint| endpoint.status == ClientEndpointStatus::Online)?;
+        let state = endpoint.cursor_color.as_ref()?;
+        let snapshot = endpoint.snapshot.as_deref()?;
+        let current = endpoint
+            .snapshot_generation
+            .is_none_or(|generation| generation == state.generation)
+            && snapshot.boot_id == state.boot_id;
+        current.then_some(state.color).flatten()
     }
 
     pub(crate) fn set_endpoint_agent_view_projection_for_generation(
@@ -742,5 +795,6 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
         methods: None,
+        cursor_color: None,
     }
 }

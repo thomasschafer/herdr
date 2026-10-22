@@ -31,12 +31,23 @@ pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
 pub const AGENT_COMPLETIONS_CAPABILITY: &str = "agent_completions";
 pub const AGENT_COMPLETIONS_KIND: &str = "endpoint.agent-completions.v1";
+pub const CURSOR_COLOR_CAPABILITY: &str = "cursor_color";
+pub const CURSOR_COLOR_KIND: &str = "endpoint.cursor-color.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointAgentCompletions {
     pub boot_id: String,
     pub revision: u64,
     pub completions: std::collections::BTreeMap<String, u64>,
+}
+
+/// Cursor color requested by the program behind this connection's surface cursor, so the
+/// client can mirror it on the host terminal. `None` restores the host's default color.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointCursorColor {
+    pub boot_id: String,
+    #[serde(default)]
+    pub color: Option<super::ClientHostColor>,
 }
 
 fn default_true() -> bool {
@@ -122,6 +133,15 @@ pub fn agent_completions_message(
     })
 }
 
+pub fn cursor_color_message(
+    cursor_color: &EndpointCursorColor,
+) -> serde_json::Result<ServerMessage> {
+    Ok(ServerMessage::EndpointControl {
+        kind: CURSOR_COLOR_KIND.into(),
+        data: serde_json::to_string(cursor_color)?,
+    })
+}
+
 pub fn agent_view_projection_message(
     boot_id: &str,
     revision: u64,
@@ -174,6 +194,7 @@ impl EndpointServerWelcome {
                 HEALTH_CHECK_CAPABILITY.into(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.into(),
                 AGENT_COMPLETIONS_CAPABILITY.into(),
+                CURSOR_COLOR_CAPABILITY.into(),
             ],
             error: None,
         }
@@ -385,6 +406,7 @@ mod tests {
                 HEALTH_CHECK_CAPABILITY.to_string(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.to_string(),
                 AGENT_COMPLETIONS_CAPABILITY.to_string(),
+                CURSOR_COLOR_CAPABILITY.to_string(),
             ]
         );
     }

@@ -729,7 +729,17 @@ impl ClientShellState {
             self.hits.popup = None;
         }
         let graphics = self.compose_graphics(layout, &occlusion);
-        Some(crate::client::frame_output::ComposedFrame { frame, graphics })
+        // An open overlay owns the cursor; otherwise it is the pane surface's cursor.
+        let cursor_color = self
+            .overlay
+            .is_none()
+            .then(|| self.active_endpoint_cursor_color())
+            .flatten();
+        Some(crate::client::frame_output::ComposedFrame {
+            frame,
+            graphics,
+            cursor_color,
+        })
     }
 }
 

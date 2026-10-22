@@ -179,6 +179,67 @@ impl HeadlessServer {
         }
     }
 
+    pub(super) fn stream_host_cursor_color(&mut self) {
+        let requested = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.is_shell_client())
+            .filter_map(|(&client_id, client)| {
+                let runtime = client
+                    .shell_surface_active
+                    .then(|| self.shell_focused_runtime(client_id))
+                    .flatten()
+                    .map(|(runtime, _)| runtime);
+                // Like the pane's frame, a color change waits for synchronized output to end.
+                if runtime.is_some_and(crate::terminal::TerminalRuntime::synchronized_output_active)
+                {
+                    return None;
+                }
+                Some((
+                    client_id,
+                    runtime.and_then(|runtime| runtime.cursor_color()),
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        let mut broken_clients = Vec::new();
+        for (client_id, color) in requested {
+            let Some(client) = self.clients.get_mut(&client_id) else {
+                continue;
+            };
+            if client.host_cursor_color == color {
+                continue;
+            }
+            let Some(writer) = &client.writer else {
+                continue;
+            };
+            let message = crate::protocol::endpoint::cursor_color_message(
+                &crate::protocol::endpoint::EndpointCursorColor {
+                    boot_id: self.client_shell_boot_id.clone(),
+                    color: color.map(Into::into),
+                },
+            );
+            let serialized = match message.map_err(std::io::Error::other).and_then(|message| {
+                Self::frame_server_message(&message).map_err(std::io::Error::other)
+            }) {
+                Ok(serialized) => serialized,
+                Err(err) => {
+                    warn!(err = %err, "failed to serialize cursor color for client");
+                    continue;
+                }
+            };
+            if writer.control.send(serialized).is_err() {
+                broken_clients.push(client_id);
+                continue;
+            }
+            client.host_cursor_color = color;
+        }
+
+        for client_id in broken_clients {
+            self.remove_client_and_resize_if_needed(client_id);
+        }
+    }
+
     pub(super) fn stream_direct_terminal_keyboard_mode(&mut self) {
         let shell_modes = self
             .clients
