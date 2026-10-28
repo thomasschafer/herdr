@@ -181,6 +181,7 @@ impl ClientShellState {
         if let Err(error) = crate::config::update_file_at(
             &self.config.local_config_path,
             "onboarding setting",
+            &[&["onboarding"]],
             |content| crate::config::upsert_top_level_bool(content, "onboarding", false),
         ) {
             self.set_local_config_diagnostic(Some(error));

@@ -7,6 +7,7 @@ use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
     "experimental",
+    INCLUDE_KEY,
     "keys",
     "onboarding",
     "remote",
@@ -130,8 +131,7 @@ pub(super) fn read_optional_config(path: &Path) -> std::io::Result<Option<String
 
 impl Config {
     pub fn load() -> LoadedConfig {
-        let path = config_path();
-        let content = match read_optional_config(&path) {
+        let content = match read_config_source() {
             Ok(Some(content)) => content,
             Ok(None) => {
                 return LoadedConfig {
@@ -141,10 +141,10 @@ impl Config {
                 };
             }
             Err(err) => {
-                warn!(err = %err, "config read error, using defaults");
+                warn!(err = %err, "using default config");
                 return LoadedConfig {
                     config: Self::default(),
-                    diagnostics: vec![format!("config read error: {err}; using defaults")],
+                    diagnostics: vec![format!("{err}; using defaults")],
                     invalid_sections: Vec::new(),
                 };
             }
@@ -158,7 +158,7 @@ impl Config {
                     ignored_keys
                         .into_iter()
                         .filter(|path| {
-                            !matches!(path.as_slice(), [ConfigKeyPathSegment::Key(key)] if unknown_sections.contains(key))
+                            !matches!(path.as_slice(), [ConfigKeyPathSegment::Key(key)] if unknown_sections.contains(key) || key == INCLUDE_KEY)
                         })
                         .collect(),
                     None,
@@ -198,6 +198,161 @@ pub fn config_path() -> PathBuf {
         return PathBuf::from(path);
     }
     config_dir().join("config.toml")
+}
+
+/// Top-level key listing config files to merge over the file that names them, so a shared
+/// config can pull in settings for one machine. Missing files are skipped, so the shared
+/// config works on machines without them.
+const INCLUDE_KEY: &str = "include";
+
+/// Reads the config file, merged with any files it includes. Errors are diagnostics for the
+/// caller to complete with what happens instead.
+fn read_config_source() -> Result<Option<String>, String> {
+    read_config_source_at(&config_path())
+}
+
+fn read_config_source_at(path: &Path) -> Result<Option<String>, String> {
+    let Some(content) =
+        read_optional_config(path).map_err(|err| format!("config read error: {err}"))?
+    else {
+        return Ok(None);
+    };
+    // Invalid TOML is reported by the caller, as it would be without includes.
+    let Ok(mut table) = content.parse::<toml::Table>() else {
+        return Ok(Some(content));
+    };
+    let included = read_included_configs(path, &mut table)?;
+    // Without anything to merge, keep the original text so errors point at its lines.
+    if included.is_empty() {
+        return Ok(Some(content));
+    }
+    for (_, included_table) in included {
+        merge_config_tables(&mut table, included_table);
+    }
+    toml::to_string(&table)
+        .map(Some)
+        .map_err(|err| format!("config parse error: failed to merge included config: {err}"))
+}
+
+/// Removes `include` from `table`, the config read from `path`, and reads the included files
+/// that exist, in order.
+fn read_included_configs(
+    path: &Path,
+    table: &mut toml::Table,
+) -> Result<Vec<(PathBuf, toml::Table)>, String> {
+    let Some(include) = table.remove(INCLUDE_KEY) else {
+        return Ok(Vec::new());
+    };
+    let parse_error = |path: &Path, message: &dyn std::fmt::Display| {
+        format!("config parse error: {}: {message}", path.display())
+    };
+    let toml::Value::Array(entries) = include else {
+        return Err(parse_error(path, &"include must be an array of file paths"));
+    };
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut included = Vec::new();
+    for entry in entries {
+        let toml::Value::String(entry) = entry else {
+            return Err(parse_error(path, &"include must be an array of file paths"));
+        };
+        // Otherwise `~/x` would be read as a relative path and, as it doesn't exist, skipped.
+        if entry.starts_with('~') {
+            return Err(parse_error(
+                path,
+                &format!("include path {entry:?} starts with ~, which isn't expanded; use an absolute path or one relative to this file"),
+            ));
+        }
+        let included_path = dir.join(&entry);
+        let Some(content) = read_optional_config(&included_path)
+            .map_err(|err| format!("config read error: {}: {err}", included_path.display()))?
+        else {
+            continue;
+        };
+        let included_table = content
+            .parse::<toml::Table>()
+            .map_err(|err| parse_error(&included_path, &err))?;
+        if included_table.contains_key(INCLUDE_KEY) {
+            return Err(parse_error(
+                &included_path,
+                &"included config files can't include others",
+            ));
+        }
+        // Errors found after merging would point at lines of the merged document, so check
+        // each included file alone first.
+        toml::from_str::<Config>(&content).map_err(|err| parse_error(&included_path, &err))?;
+        included.push((included_path, included_table));
+    }
+    Ok(included)
+}
+
+/// Merges `overrides` into `base`. Tables merge key by key and arrays of tables, such as
+/// `[[keys.command]]`, are appended; any other value in `overrides` replaces the base value.
+fn merge_config_tables(base: &mut toml::Table, overrides: toml::Table) {
+    for (key, value) in overrides {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base_table)), toml::Value::Table(table)) => {
+                merge_config_tables(base_table, table);
+            }
+            (Some(toml::Value::Array(base_items)), toml::Value::Array(items))
+                if base_items.iter().all(toml::Value::is_table)
+                    && items.iter().all(toml::Value::is_table) =>
+            {
+                base_items.extend(items);
+            }
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
+}
+
+/// Returns the first of `keys` set by a file that the config at `path` includes, with that
+/// file, as a change to the key in `path` would have no effect.
+pub(crate) fn included_config_key(
+    path: &Path,
+    keys: &[&[&str]],
+) -> Result<Option<(String, PathBuf)>, String> {
+    let Some(content) =
+        read_optional_config(path).map_err(|err| format!("config read error: {err}"))?
+    else {
+        return Ok(None);
+    };
+    // Callers that go on to edit the file report invalid TOML themselves.
+    let Ok(mut table) = content.parse::<toml::Table>() else {
+        return Ok(None);
+    };
+    for (included_path, included) in read_included_configs(path, &mut table)? {
+        let set = keys.iter().find(|key| {
+            let Some((last, sections)) = key.split_last() else {
+                return false;
+            };
+            let mut table = &included;
+            for section in sections {
+                match table.get(*section) {
+                    Some(toml::Value::Table(section)) => table = section,
+                    _ => return false,
+                }
+            }
+            table.contains_key(*last)
+        });
+        if let Some(key) = set {
+            return Ok(Some((key.join("."), included_path)));
+        }
+    }
+    Ok(None)
+}
+
+/// Errors when a file that the config at `path` includes sets any of `keys`, so saving them
+/// to `path` would silently have no effect.
+pub(crate) fn ensure_config_keys_not_included(path: &Path, keys: &[&[&str]]) -> Result<(), String> {
+    match included_config_key(path, keys)? {
+        None => Ok(()),
+        Some((key, included_path)) => Err(format!(
+            "{key} is set in {}, which takes precedence; change it there instead",
+            included_path.display()
+        )),
+    }
 }
 
 pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
@@ -244,8 +399,7 @@ pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
 }
 
 pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
-    let path = config_path();
-    let content = match read_optional_config(&path) {
+    let content = match read_config_source() {
         Ok(Some(content)) => content,
         Ok(None) => {
             return Ok(LoadedConfig {
@@ -254,11 +408,7 @@ pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
                 invalid_sections: Vec::new(),
             });
         }
-        Err(err) => {
-            return Err(vec![format!(
-                "config read error: {err}; keeping current config"
-            )]);
-        }
+        Err(err) => return Err(vec![format!("{err}; keeping current config")]),
     };
     load_live_config_from_str(&content)
 }
@@ -759,6 +909,260 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_config_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn merge_config_tables_merges_tables_appends_arrays_of_tables_and_replaces_values() {
+        let mut base: toml::Table = toml::from_str(
+            r#"
+            [ui]
+            confirm_close = true
+            mouse_capture = true
+            right_click_passthrough_modifiers = ["shift"]
+
+            [[keys.command]]
+            key = "a"
+            "#,
+        )
+        .unwrap();
+        let overrides: toml::Table = toml::from_str(
+            r#"
+            [ui]
+            confirm_close = false
+            right_click_passthrough_modifiers = ["alt"]
+
+            [[keys.command]]
+            key = "b"
+            "#,
+        )
+        .unwrap();
+
+        merge_config_tables(&mut base, overrides);
+
+        let expected: toml::Table = toml::from_str(
+            r#"
+            [ui]
+            confirm_close = false
+            mouse_capture = true
+            right_click_passthrough_modifiers = ["alt"]
+
+            [[keys.command]]
+            key = "a"
+
+            [[keys.command]]
+            key = "b"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(base, expected);
+    }
+
+    #[test]
+    fn read_config_source_returns_base_unchanged_without_includes() {
+        let dir = temp_config_dir("config-source-no-includes");
+        let path = dir.join("config.toml");
+        let content = "# comment\n[ui]\nconfirm_close = false\n";
+        std::fs::write(&path, content).unwrap();
+
+        let source = read_config_source_at(&path);
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(source, Ok(Some(content.to_string())));
+    }
+
+    #[test]
+    fn read_config_source_returns_base_unchanged_when_included_files_are_missing() {
+        let dir = temp_config_dir("config-source-missing-include");
+        let path = dir.join("config.toml");
+        let content = "include = [\"config.local.toml\"]\n[ui]\nconfirm_close = false\n";
+        std::fs::write(&path, content).unwrap();
+
+        let source = read_config_source_at(&path);
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(source, Ok(Some(content.to_string())));
+    }
+
+    #[test]
+    fn read_config_source_merges_included_files_in_order() {
+        let dir = temp_config_dir("config-source-merge");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "include = [\"one.toml\", \"missing.toml\", \"two.toml\"]\n[ui]\nconfirm_close = false\n[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ncommand = \"base\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("one.toml"),
+            "[ui]\nmouse_capture = false\nprompt_new_tab_name = true\n[[keys.command]]\nkey = \"prefix+b\"\ntype = \"shell\"\ncommand = \"one\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("two.toml"),
+            "[ui]\nprompt_new_tab_name = false\n[[keys.command]]\nkey = \"prefix+c\"\ntype = \"shell\"\ncommand = \"two\"\n",
+        )
+        .unwrap();
+
+        let source = read_config_source_at(&path).unwrap().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert!(!source.contains("include"), "{source}");
+        let config: Config = toml::from_str(&source).unwrap();
+        assert!(!config.ui.confirm_close);
+        assert!(!config.ui.mouse_capture);
+        assert!(!config.ui.prompt_new_tab_name);
+        let commands: Vec<_> = config
+            .keys
+            .command
+            .iter()
+            .map(|command| command.command.as_str())
+            .collect();
+        assert_eq!(commands, ["base", "one", "two"]);
+    }
+
+    #[test]
+    fn read_config_source_resolves_absolute_include_paths() {
+        let dir = temp_config_dir("config-source-absolute-include");
+        let path = dir.join("config.toml");
+        let included_path = dir.join("elsewhere.toml");
+        std::fs::write(
+            &path,
+            format!("include = [{:?}]\n", included_path.display().to_string()),
+        )
+        .unwrap();
+        std::fs::write(&included_path, "[ui]\nconfirm_close = false\n").unwrap();
+
+        let source = read_config_source_at(&path).unwrap().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+
+        let config: Config = toml::from_str(&source).unwrap();
+        assert!(!config.ui.confirm_close);
+    }
+
+    fn read_config_source_error(name: &str, base: &str, included: &str) -> (String, PathBuf) {
+        let dir = temp_config_dir(name);
+        let path = dir.join("config.toml");
+        std::fs::write(&path, base).unwrap();
+        std::fs::write(dir.join("config.local.toml"), included).unwrap();
+
+        let source = read_config_source_at(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        (source.unwrap_err(), dir)
+    }
+
+    #[test]
+    fn read_config_source_names_the_included_file_when_it_is_invalid_toml() {
+        let (err, dir) = read_config_source_error(
+            "config-source-invalid-include",
+            "include = [\"config.local.toml\"]\n",
+            "[ui\n",
+        );
+        let expected = format!(
+            "config parse error: {}:",
+            dir.join("config.local.toml").display()
+        );
+        assert!(err.starts_with(&expected), "{err}");
+    }
+
+    #[test]
+    fn read_config_source_names_the_included_file_when_a_value_is_invalid() {
+        let (err, dir) = read_config_source_error(
+            "config-source-invalid-include-value",
+            "include = [\"config.local.toml\"]\n[ui]\nconfirm_close = true\n",
+            "[ui]\nconfirm_close = \"nope\"\n",
+        );
+        let expected = format!(
+            "config parse error: {}: TOML parse error at line 2",
+            dir.join("config.local.toml").display()
+        );
+        assert!(err.starts_with(&expected), "{err}");
+    }
+
+    #[test]
+    fn read_config_source_rejects_nested_includes() {
+        let (err, _) = read_config_source_error(
+            "config-source-nested-include",
+            "include = [\"config.local.toml\"]\n",
+            "include = [\"other.toml\"]\n",
+        );
+        assert!(
+            err.ends_with("included config files can't include others"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn read_config_source_rejects_include_paths_starting_with_tilde() {
+        let (err, _) = read_config_source_error(
+            "config-source-tilde-include",
+            "include = [\"~/config.local.toml\"]\n",
+            "",
+        );
+        assert!(err.contains("starts with ~, which isn't expanded"), "{err}");
+    }
+
+    #[test]
+    fn read_config_source_rejects_include_that_is_not_an_array_of_paths() {
+        for base in ["include = \"config.local.toml\"\n", "include = [1]\n"] {
+            let (err, _) = read_config_source_error("config-source-include-type", base, "");
+            assert!(
+                err.ends_with("include must be an array of file paths"),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn included_config_key_finds_nested_keys_set_in_included_files() {
+        let dir = temp_config_dir("config-included-key");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "include = [\"config.local.toml\"]\n").unwrap();
+        let included_path = dir.join("config.local.toml");
+        std::fs::write(&included_path, "[ui.sound]\nenabled = false\n").unwrap();
+
+        let sound = included_config_key(
+            &path,
+            &[&["ui", "status_indicators"], &["ui", "sound", "enabled"]],
+        );
+        let theme = included_config_key(&path, &[&["theme", "name"]]);
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(
+            sound,
+            Ok(Some(("ui.sound.enabled".to_string(), included_path)))
+        );
+        assert_eq!(theme, Ok(None));
+    }
+
+    #[test]
+    fn config_load_does_not_report_include_as_an_unknown_key() {
+        let dir = temp_config_dir("config-load-include-known");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "include = [\"config.local.toml\"]\n").unwrap();
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+        let loaded = Config::load();
+        let live = load_live_config();
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(loaded.diagnostics, Vec::<String>::new());
+        assert_eq!(live.unwrap().diagnostics, Vec::<String>::new());
+    }
 
     #[test]
     fn upsert_top_level_bool_replaces_existing_value() {

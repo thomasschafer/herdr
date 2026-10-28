@@ -190,6 +190,12 @@ fn channel_set(args: &[String]) -> std::io::Result<i32> {
     }
 
     let path = crate::config::config_path();
+    if let Err(err) =
+        crate::config::ensure_config_keys_not_included(&path, &[&["update", "channel"]])
+    {
+        eprintln!("can't change the update channel: {err}");
+        return Ok(1);
+    }
     let content = if path.exists() {
         std::fs::read_to_string(&path)?
     } else {
@@ -399,6 +405,14 @@ fn config_reset_keys(args: &[String]) -> std::io::Result<i32> {
         "Removed [keys], [keys.indexed], and [[keys.command]] from {}.",
         path.display()
     );
+    match crate::config::included_config_key(&path, &[&["keys"]]) {
+        Ok(None) => {}
+        Ok(Some((_, included_path))) => eprintln!(
+            "warning: {} also sets keybindings, which still apply; edit it to remove them.",
+            included_path.display()
+        ),
+        Err(err) => eprintln!("warning: could not check included config for keybindings: {err}"),
+    }
     println!("Built-in v2 keybindings will apply after Herdr restarts or reloads config.");
     println!("If a Herdr server is running, run `herdr server reload-config` to apply this now.");
     println!(

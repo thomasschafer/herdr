@@ -38,6 +38,31 @@ Herdr shows first-run setup when `onboarding` is missing or true. Continuing fro
 onboarding = false
 ```
 
+### Including other config files
+
+`include` lists config files to merge over `config.toml`. This lets you share `config.toml` between machines, for example from a dotfiles repository, and keep settings that only apply to one machine in a separate file. Files that don't exist are skipped, so the shared config still works on machines without them.
+
+```toml
+# config.toml
+include = ["config.local.toml"]
+```
+
+```toml
+# config.local.toml
+[ui]
+confirm_close = false
+
+[[keys.command]]
+key = "prefix+alt+g"
+type = "popup"
+command = "lazygit"
+description = "run lazygit"
+```
+
+Paths are relative to the file that includes them, or absolute; `~` isn't expanded. Included files are merged in order, and can't include other files. Tables merge key by key. Arrays of tables, such as `[[keys.command]]`, are added to those already loaded. Any other value replaces the one already loaded.
+
+Settings Herdr saves for you, such as the theme chosen in settings or `herdr channel set`, are written to `config.toml`. If an included file sets the same key, Herdr refuses to save it, since the change would have no effect; edit the included file instead. `herdr config reset-keys` only edits `config.toml`.
+
 ## Reload config
 
 Reload a running server after editing `config.toml`:
